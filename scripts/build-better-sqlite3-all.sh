@@ -30,4 +30,12 @@ build_for() {
 
 build_for "$NODE18_BIN" "Node 18"
 build_for "$NODE23_BIN" "Node 23"
+
+# Leave the default generic binding as the Node 18 (ABI 108) build so dsh runs on
+# Node 18 out of the box. Node 23 (ABI 131) is still served at runtime by
+# scripts/better-sqlite3-abi-loader.mjs, which swaps in the matching prebuilt
+# before better-sqlite3 is required.
+cp -f "$PKG/prebuilt/better_sqlite3.abi108.node" "$PKG/build/Release/better_sqlite3.node"
+echo "default generic set to Node 18 ($(stat -c%s "$PKG/build/Release/better_sqlite3.node") bytes)"
+
 echo "done."

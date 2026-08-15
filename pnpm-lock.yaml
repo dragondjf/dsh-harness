@@ -3151,6 +3151,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -6059,6 +6062,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+      '@hpcc-js/wasm-zstd':
+        specifier: ^1.15.0
+        version: 1.15.0
       koffi:
         specifier: ^3.1.0
         version: 3.1.1
@@ -9799,6 +9805,9 @@ packages:
     engines: {node: '>=18.14.1'}
     peerDependencies:
       hono: ^4
+
+  '@hpcc-js/wasm-zstd@1.15.0':
+    resolution: {integrity: sha512-WjcnbecP+iWNzg/njGoUmQ64DNyadGuEnpNy3a151xqasIHThzZMNuGO2xk3vMwyQ3iYbDU7Z29ntXj4aPolQg==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -15336,6 +15345,8 @@ snapshots:
   '@hono/node-server@1.19.14(hono@4.12.29)':
     dependencies:
       hono: 4.12.29
+
+  '@hpcc-js/wasm-zstd@1.15.0': {}
 
   '@humanfs/core@0.19.2':
     dependencies:

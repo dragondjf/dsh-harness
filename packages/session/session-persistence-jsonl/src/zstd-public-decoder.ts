@@ -3,10 +3,10 @@
  * @module dsh-session-persistence-jsonl/zstd-public-decoder
  */
 
-import { zstdDecompressSync } from 'node:zlib'
+import { decompressSyncBackend } from './zstd-backend.ts'
 import type { ZstdFrameDecoder, ZstdFrameRange } from './zstd.ts'
 
-/** Multi-frame adapter built exclusively from Node's supported one-shot API. */
+/** Multi-frame adapter built from the zstd backend (native on Node 22+, wasm otherwise). */
 export class PublicZstdFrameDecoder implements ZstdFrameDecoder {
   private started = false
   private closed = false
@@ -20,7 +20,7 @@ export class PublicZstdFrameDecoder implements ZstdFrameDecoder {
       for (const { start, end } of frames) {
         let decoded: Buffer
         try {
-          decoded = zstdDecompressSync(source.subarray(start, end))
+          decoded = decompressSyncBackend(source.subarray(start, end))
         } catch (error) {
           throw new Error(`corrupt Zstandard session log: frame at byte ${start} failed validation`, {
             cause: error,

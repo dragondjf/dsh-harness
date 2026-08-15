@@ -4,7 +4,7 @@
  */
 
 import { constants as bufferConstants } from 'node:buffer'
-import { createZstdDecompress } from 'node:zlib'
+import * as nodeZlib from 'node:zlib'
 import type { ZstdFrameDecoder, ZstdFrameRange } from './zstd.ts'
 
 const DECODE_CHUNK_SIZE = 1024 * 1024
@@ -30,11 +30,11 @@ interface NodeZstdPrivateState {
   _defaultFlushFlag: number
 }
 
-type NodeZstdPrivateStream = ReturnType<typeof createZstdDecompress> & NodeZstdPrivateState
+type NodeZstdPrivateStream = ReturnType<typeof nodeZlib.createZstdDecompress> & NodeZstdPrivateState
 
 /** Return the stream with its observed private Node contract, or reject that optimization. */
 function privateZstdStream(
-  stream: ReturnType<typeof createZstdDecompress>,
+  stream: ReturnType<typeof nodeZlib.createZstdDecompress>,
 ): { stream: NodeZstdPrivateStream; errorKey: symbol } | undefined {
   const candidate = stream as unknown as Partial<NodeZstdPrivateState>
   const handle = candidate._handle
@@ -81,7 +81,11 @@ export class NodePrivateZstdFrameDecoder implements ZstdFrameDecoder {
    * @returns a shared decoder, or `undefined` when callers must use the public fallback.
    */
   static create(): NodePrivateZstdFrameDecoder | undefined {
-    const stream = createZstdDecompress({ chunkSize: DECODE_CHUNK_SIZE })
+    // The Node-private zstd stream shape is only exposed on Node 22+, which is
+    // also the only release that ships node:zlib zstd. On older Node the public
+    // wasm-backed decoder is the correct path, so return undefined here.
+    if (typeof nodeZlib.createZstdDecompress !== 'function') return undefined
+    const stream = nodeZlib.createZstdDecompress({ chunkSize: DECODE_CHUNK_SIZE })
     const privateAccess = privateZstdStream(stream)
     /* v8 ignore next -- reached only when a supported Node release changes its private stream shape. */
     if (privateAccess !== undefined) {

@@ -5,22 +5,11 @@
  * @module dsh-session-persistence-jsonl/zstd
  */
 
-import {
-  constants, zstdCompress, zstdDecompress, type ZstdOptions,
-} from 'node:zlib'
-import { promisify } from 'node:util'
 import { NodePrivateZstdFrameDecoder } from './zstd-private-decoder.ts'
 import { PublicZstdFrameDecoder } from './zstd-public-decoder.ts'
+import { compressFrameBackend, decompressFrameBackend, decompressPrefixBackend } from './zstd-backend.ts'
 
 const ZSTD_MAGIC = 0xFD2FB528
-const zstdCompressAsync = promisify(zstdCompress)
-const zstdDecompressAsync = promisify(zstdDecompress)
-const CHECKSUM_OPTIONS: ZstdOptions = {
-  params: { [constants.ZSTD_c_checksumFlag]: 1 },
-}
-const INCOMPLETE_FRAME_OPTIONS: ZstdOptions = {
-  finishFlush: constants.ZSTD_e_flush,
-}
 
 /** Byte range occupied by one structurally complete Zstandard frame. */
 export interface ZstdFrameRange {
@@ -109,7 +98,7 @@ export function scanZstdFrames(buffer: Buffer, maxFrames = Number.POSITIVE_INFIN
  * @returns the complete encoded frame.
  */
 export async function compressZstdFrame(input: Buffer | string): Promise<Buffer> {
-  return zstdCompressAsync(input, CHECKSUM_OPTIONS)
+  return compressFrameBackend(input)
 }
 
 /**
@@ -118,7 +107,7 @@ export async function compressZstdFrame(input: Buffer | string): Promise<Buffer>
  * @returns the frame plaintext.
  */
 export async function decompressZstdFrame(input: Buffer): Promise<Buffer> {
-  return zstdDecompressAsync(input)
+  return decompressFrameBackend(input)
 }
 
 /** Common lifecycle for interchangeable synchronous multi-frame decoders. */
@@ -152,5 +141,5 @@ export function createZstdFrameDecoder(): ZstdFrameDecoder {
  * @returns plaintext produced from the available input.
  */
 export async function decompressZstdPrefix(input: Buffer): Promise<Buffer> {
-  return zstdDecompressAsync(input, INCOMPLETE_FRAME_OPTIONS)
+  return decompressPrefixBackend(input)
 }

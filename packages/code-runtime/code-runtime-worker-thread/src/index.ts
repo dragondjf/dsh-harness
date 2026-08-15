@@ -7,12 +7,29 @@
  */
 
 import { Worker } from 'node:worker_threads'
-import { stripTypeScriptTypes } from 'node:module'
+import * as nodeModule from 'node:module'
+import * as ts from 'typescript'
 import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+
+/**
+ * Strip TypeScript type annotations before handing a program to the worker.
+ * Node 22.13+ exposes `module.stripTypeScriptTypes`; on older Node we fall back
+ * to the TypeScript compiler, which removes types but (unlike the native strip)
+ * also lowers non-erasable syntax such as enums and parameter properties.
+ */
+const stripTypeScriptTypes: (source: string) => string =
+  typeof (nodeModule as { stripTypeScriptTypes?: (source: string) => string }).stripTypeScriptTypes === 'function'
+    ? (nodeModule as { stripTypeScriptTypes: (source: string) => string }).stripTypeScriptTypes
+    : (source: string) => ts.transpileModule(source, {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.ESNext,
+      },
+    }).outputText
 import { CodeRuntime, DUNDER_MEMBER, PORTABLE_RESERVED_WORDS, RESERVED_BINDING_GLOBALS, RESERVED_ERROR_MEMBERS } from '@deepseek-ai/dsh-code-runtime'
 import type { CodeBindingNamespace, CodeJsonValue, CodeRunFailure, CodeRunRequest, CodeRunResult } from '@deepseek-ai/dsh-code-runtime'
 import { snapshotJsonValue } from '@deepseek-ai/dsh-session'

@@ -16,6 +16,12 @@
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
     "verbatimModuleSyntax": false,
+    // Emit const enums as real runtime objects so cross-package value imports
+    // (e.g. `FiberState` from @deepseek-ai/cordis) work from the built `lib/`
+    // output. Required for runtimes (Node 18) where tsx does not apply the
+    // tsconfig `paths` facade and resolves workspace packages to their built
+    // artifacts instead of source.
+    "preserveConstEnums": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,

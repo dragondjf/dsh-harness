@@ -86,10 +86,11 @@ async function findWatchRoot(filename: string): Promise<{ filename: string; root
 class Hmr extends Service {
   static inject = ['loader', 'timer']
 
-  public baseDir: string
+  public baseDir!: string
 
-  private internal: ModuleLoader
+  private internal!: ModuleLoader
   private watcher!: FSWatcher
+  private inactive = false
   private readonly configs = new Map<string, ConfigRegistration>()
   private readonly configRefreshes = new WeakMap<object, ConfigRefresh>()
   private readonly refreshTasks = new Set<Promise<void>>()
@@ -117,8 +118,13 @@ class Hmr extends Service {
 
   constructor(ctx: Context, public config: Hmr.Config) {
     super(ctx, 'hmr')
+    // HMR requires Node's internal ESM loader, which is only reachable on Node
+    // 22+ (and then only with --expose-internals). On older Node it cannot
+    // function, so degrade to a no-op service instead of aborting boot.
     if (!this.ctx.loader.internal) {
-      throw new Error('--expose-internals is required for HMR service')
+      this.inactive = true
+      ctx.logger.warn('HMR disabled: Node internal module loader unavailable (requires Node 22+ with --expose-internals)')
+      return
     }
     this.internal = this.ctx.loader.internal
     this.baseDir = fileURLToPath(new URL(config.base || '.', ctx.baseUrl))
@@ -132,6 +138,7 @@ class Hmr extends Service {
    * @throws when HMR is inactive, the path is already registered, or watcher startup fails.
    */
   async registerConfig(filename: string, refresh: () => Promise<void> | void): Promise<() => Promise<void>> {
+    if (this.inactive) return async () => {}
     if (!this.watcher) throw new Error('HMR is not active')
     filename = resolve(this.baseDir, filename)
     const target = await findWatchRoot(filename)
@@ -203,7 +210,7 @@ class Hmr extends Service {
       this.configs.clear()
       await Promise.allSettled([...this.refreshTasks])
     }
-
+    if (this.inactive) return
     const { loader } = this.ctx
     const { root, ignored } = this.config
     if (!this.config.base) {

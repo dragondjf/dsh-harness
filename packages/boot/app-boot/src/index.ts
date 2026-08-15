@@ -8,7 +8,10 @@
 
 import { pathToFileURL } from 'node:url'
 import { readFileSync } from 'node:fs'
-import { parseEnv } from 'node:util'
+import * as nodeUtil from 'node:util'
+// `util.parseEnv` is Node 20.12+; fall back to a compatible parser on older Node.
+const parseEnv = (nodeUtil as { parseEnv?: (c: string) => Record<string, string> }).parseEnv
+  ?? parseEnvShim
 import { basename, dirname, isAbsolute, resolve } from 'node:path'
 import * as yaml from 'js-yaml'
 import { Context, type FiberState } from '@deepseek-ai/cordis'
@@ -20,6 +23,54 @@ import { createLaunchEnvironmentSnapshot, type LaunchEnvironmentSnapshot } from 
 import type {} from '@deepseek-ai/cordis-plugin-hmr'
 // Side-effect type import: resolves `ctx.get('systemPrompt')` to the service.
 import type {} from '@deepseek-ai/dsh-system-prompt'
+
+/**
+ * Node 18 fallback for `util.parseEnv` (Node 20.12+). Parses `.env`-style
+ * assignments: blank/`#` lines are skipped, single-quoted values are literal,
+ * double-quoted values honor backslash escapes and `$VAR`/`${VAR}` expansion,
+ * and unquoted values stop at `#` (comment) with the same expansion rules.
+ */
+function parseEnvShim(content: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  const env = process.env as Record<string, string | undefined>
+  for (const raw of content.split(/\r?\n/)) {
+    const trimmedStart = raw.trimStart()
+    if (trimmedStart === '' || trimmedStart.startsWith('#')) continue
+    const eq = raw.indexOf('=')
+    if (eq === -1) continue
+    const key = raw.slice(0, eq).trim()
+    out[key] = parseEnvValue(raw.slice(eq + 1), env, out)
+  }
+  return out
+}
+
+function parseEnvValue(value: string, env: Record<string, string | undefined>, defined: Record<string, string>): string {
+  const v = value.trim()
+  if (v.length >= 2 && v[0] === "'" && v.endsWith("'")) {
+    return v.slice(1, -1).replace(/\\'/g, "'")
+  }
+  if (v.length >= 2 && v[0] === '"' && v.endsWith('"')) {
+    let inner = v.slice(1, -1)
+    inner = inner
+      .replace(/\\(n|r|t|v|0)/g, (_, c: string) => ({ n: '\n', r: '\r', t: '\t', v: '\v', '0': '\0' })[c] as string)
+      .replace(/\\x([0-9a-fA-F]{2})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/\\u(\{[0-9a-fA-F]+\}|[0-9a-fA-F]{4})/g, (_, h: string) => String.fromCodePoint(parseInt(h.replace(/[{}]/g, ''), 16)))
+      .replace(/\\(.)/g, (_, c: string) => c)
+    return expandVars(inner, env, defined)
+  }
+  let un = value.trim()
+  const hash = un.indexOf('#')
+  if (hash !== -1) un = un.slice(0, hash)
+  un = un.replace(/\\(.)/g, (_, c: string) => c)
+  return expandVars(un, env, defined)
+}
+
+function expandVars(s: string, env: Record<string, string | undefined>, defined: Record<string, string>): string {
+  return s.replace(/\$\{(\w+)\}|\$(\w+)/g, (_, b: string | undefined, c: string | undefined) => {
+    const name = (b ?? c) as string
+    return defined[name] ?? env[name] ?? ''
+  })
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

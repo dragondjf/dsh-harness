@@ -12,6 +12,9 @@
  *   configs (agent presets, the mcp-memory example).
  * - `Symbol.dispose` / `Symbol.asyncDispose`: required by down-leveled `using`
  *   declarations under tsx on Node 18.
+ * - `crypto` (Web Crypto) global: exposed as a global since Node 19/20, but Node
+ *   18 only provides it via `node:crypto`.webcrypto. Several packages reference
+ *   the bare `crypto` global.
  *
  * This file is plain ESM JavaScript (no TypeScript) so it can be loaded via
  * `node --import` on Node 18 *before* the tsx loader registers, guaranteeing the
@@ -21,6 +24,7 @@
  *   node --import ./scripts/node18-polyfills.mjs --import tsx/esm apps/cli/src/bin.ts
  */
 import { createRequire } from 'node:module'
+import { webcrypto } from 'node:crypto'
 
 export function makeWithResolvers() {
   let resolve
@@ -37,6 +41,31 @@ export function makeGetBuiltinModule() {
   return (id) => requireFn(id)
 }
 
+export function makeArrayShims() {
+  const AP = Array.prototype
+  const define = (name, fn) => {
+    if (typeof AP[name] !== 'function') {
+      Object.defineProperty(AP, name, { value: fn, writable: true, configurable: true, enumerable: false })
+    }
+  }
+  define('toSpliced', function (start, deleteCount, ...items) {
+    const out = this.slice()
+    out.splice(start, deleteCount, ...items)
+    return out
+  })
+  define('toReversed', function () {
+    return this.slice().reverse()
+  })
+  define('toSorted', function (compareFn) {
+    return this.slice().sort(compareFn)
+  })
+  define('with', function (index, value) {
+    const out = this.slice()
+    out[index] = value
+    return out
+  })
+}
+
 export function installNode18Polyfills() {
   const P = Promise
   if (typeof P.withResolvers !== 'function') P.withResolvers = makeWithResolvers
@@ -47,6 +76,15 @@ export function installNode18Polyfills() {
   const Sym = Symbol
   if (typeof Sym.dispose !== 'symbol') Sym.dispose = Symbol.for('nodejs.dispose')
   if (typeof Sym.asyncDispose !== 'symbol') Sym.asyncDispose = Symbol.for('nodejs.asyncDispose')
+
+  // `crypto` global (Web Crypto) — global since Node 19/20; Node 18 only has it
+  // behind `node:crypto`.webcrypto.
+  if (typeof globalThis.crypto === 'undefined') globalThis.crypto = webcrypto
+
+  // ES2023 Array methods (toSpliced/toReversed/toSorted/with) — shipped in Node
+  // 20; absent on Node 18. Used by the agent inbox, api-proxy, and
+  // agent-instructions packages.
+  makeArrayShims()
 }
 
 installNode18Polyfills()
