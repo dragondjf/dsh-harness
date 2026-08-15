@@ -14,6 +14,8 @@
 # @hpcc-js/wasm-zstd wasm). The two `--import` shims auto-select the correct
 # better-sqlite3 ABI and polyfill Node 22+ APIs on Node 18.
 #
+# Full deploy + backend-rebuild flow: see NODE18-DEPLOY.md (repo root).
+#
 # Usage:
 #   ./scripts/start-dsh.sh [start|stop|status|restart]   (default: start)
 #
