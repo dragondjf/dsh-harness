@@ -33,7 +33,7 @@
 # Examples:
 #   ./scripts/start-dsh.sh                       # boot web UI on :3080
 #   DSH_PORT=8080 ./scripts/start-dsh.sh         # boot on :8080
-#   DSH_PERMISSION_MODE=ask ./scripts/start-dsh.sh
+#   DSH_PERMISSION_MODE=workspace-write ./scripts/start-dsh.sh
 #   DSH_FOREGROUND=1 ./scripts/start-dsh.sh       # run in terminal (Ctrl-C to stop)
 #
 set -euo pipefail
@@ -105,6 +105,14 @@ preflight() {
   for f in scripts/better-sqlite3-abi-loader.mjs scripts/node18-polyfills.mjs; do
     if [[ ! -f "$f" ]]; then echo "✗ $f missing." >&2; exit 1; fi
   done
+  # Path A (fresh box) gotcha: the web frontend bundle is gitignored and NOT in
+  # the committed lib/. Forgetting `pnpm build:web` makes the server boot fine
+  # but serve a blank page. Catch it up front with the fix command.
+  if [[ "$PROFILE" == "web" && ! -f "$REPO_ROOT/apps/web/dist/index.html" ]]; then
+    echo "⚠ apps/web/dist missing — the web UI will serve a blank page." >&2
+    echo "  Fix (Path A): pnpm build:web   # regenerates apps/web/dist" >&2
+    echo "  Fix (Path B): ensure apps/web/dist was copied with the repo tree" >&2
+  fi
   if [[ -n "${DEEPSEEK_API_KEY:-}" ]]; then
     export DEEPSEEK_API_KEY
   elif [[ ! -f "$REPO_ROOT/.env" ]]; then
