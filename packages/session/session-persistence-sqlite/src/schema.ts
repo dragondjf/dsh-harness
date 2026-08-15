@@ -78,7 +78,7 @@ export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
  * @param journalMode - validated journal pragma.
  * @returns the open handle with pragmas applied and all three tables ensured.
  */
-export function openDatabase(path: string, journalMode: JournalMode): Database {
+export function openDatabase(path: string, journalMode: JournalMode): Database.Database {
   const db = new Database(path)
   try {
     configureDatabase(db, path, journalMode)
@@ -89,7 +89,7 @@ export function openDatabase(path: string, journalMode: JournalMode): Database {
   }
 }
 
-function configureDatabase(db: Database, path: string, journalMode: JournalMode): void {
+function configureDatabase(db: Database.Database, path: string, journalMode: JournalMode): void {
   db.exec('PRAGMA foreign_keys = ON')
   let began = false
   try {

@@ -58,7 +58,7 @@ async function createDatabaseFile(path: string): Promise<void> {
  * @param journalMode - validated journal pragma.
  * @returns the open handle with pragmas applied and the unit metadata tables ensured.
  */
-export async function openDatabase(path: string, journalMode: JournalMode): Promise<Database> {
+export async function openDatabase(path: string, journalMode: JournalMode): Promise<Database.Database> {
   const actual = path === ':memory:' ? path : resolve(path)
   if (actual !== ':memory:') {
     await mkdir(dirname(actual), { recursive: true, mode: 0o700 })
@@ -74,7 +74,7 @@ export async function openDatabase(path: string, journalMode: JournalMode): Prom
   }
 }
 
-function configureDatabase(db: Database, path: string, journalMode: JournalMode): void {
+function configureDatabase(db: Database.Database, path: string, journalMode: JournalMode): void {
   db.exec('PRAGMA foreign_keys = ON')
   // The validated union is safe to interpolate into a non-bindable PRAGMA.
   db.exec(`PRAGMA journal_mode = ${journalMode.toUpperCase()}`)

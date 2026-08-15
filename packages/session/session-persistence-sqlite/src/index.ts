@@ -10,7 +10,7 @@ import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
-import Database from 'better-sqlite3'
+import type Database from 'better-sqlite3'
 import { mkdir, open } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import {
@@ -116,7 +116,7 @@ export class SqliteSessionPersistence extends SessionPersistence implements Pers
    */
   override readonly name = 'session-persistence-sqlite'
 
-  private db!: Database
+  private db!: Database.Database
   private storeIdentity!: string
   private ready: Promise<void>
   private coordinator: PersistenceCoordinator<number>

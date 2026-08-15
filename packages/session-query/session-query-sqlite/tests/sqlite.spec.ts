@@ -1204,7 +1204,7 @@ describe('SQLite reconciliation and source lifecycle', () => {
 
     const live = ctx.sessions.create(SessionId('live'), { seed: messageEvents('base') })
     await ctx.sessionQuery.searchEvents({ sessionId: live.id, query: 'base' })
-    const db = (ctx.sessionQuery as unknown as { _db: Database })._db
+    const db = (ctx.sessionQuery as unknown as { _db: Database.Database })._db
     db.exec('PRAGMA query_only = ON')
     live.append('user/message', createUserMessage({
       content: [{ type: 'text', text: 'retry needle' }], source: { kind: 'user' },
@@ -1642,7 +1642,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     releaseActive()
     await expect(active).rejects.toThrow(expectCode('SESSION_QUERY_ABORTED'))
 
-    const db = (ctx.sessionQuery as unknown as { _db: Database })._db
+    const db = (ctx.sessionQuery as unknown as { _db: Database.Database })._db
     expect(db.prepare('SELECT COUNT(*) AS count FROM persisted_sessions').get()).toEqual({ count: 0 })
     await expect(ctx.sessionQuery.searchSessions({ query: 'needle' }))
       .resolves.toMatchObject({ items: [{ header: { id: SessionId('uncommitted') } }] })
@@ -1670,7 +1670,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     TestPersistence.reset()
     const ctx = await liveContext()
     const internals = ctx.sessionQuery as unknown as {
-      _db: Database
+      _db: Database.Database
       _ready: Promise<void>
       _ensureReady(signal: AbortSignal | undefined): Promise<void>
     }

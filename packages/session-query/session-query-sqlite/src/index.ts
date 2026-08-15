@@ -216,7 +216,7 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
 
   private readonly _instance = randomUUID()
   private _ready: Promise<void> | undefined
-  private _db: Database | undefined
+  private _db: Database.Database | undefined
   private _persistenceBinding: PersistenceBinding = { identity: Symbol() }
   private _lastPersistenceIdentity: symbol | undefined
   private _persistenceEpoch = 0
@@ -749,7 +749,7 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     }
   }
 
-  private _requireDb(): Database {
+  private _requireDb(): Database.Database {
     /* v8 ignore next -- callers await `_ready`; this guards lifecycle misuse */
     if (this._db === undefined) throw indexClosed()
     return this._db

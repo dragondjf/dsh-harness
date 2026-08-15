@@ -56,7 +56,7 @@ export class SqliteStorageBackend implements StorageBackend {
   /** The key-value facet; the only shape this backend serves. */
   readonly kv: KvFacet = { open: descriptor => this.openUnit(descriptor) }
 
-  private readonly ready: Promise<Database>
+  private readonly ready: Promise<Database.Database>
   /** Open (or still-opening) units by name; presence is the double-open guard. */
   private readonly units = new Map<string, Promise<SqliteKvUnit>>()
   private closing: Promise<void> | undefined
@@ -133,7 +133,7 @@ export class SqliteStorageBackend implements StorageBackend {
   }
 
   private async doClose(): Promise<void> {
-    let db: Database
+    let db: Database.Database
     try {
       db = await this.ready
     } catch {

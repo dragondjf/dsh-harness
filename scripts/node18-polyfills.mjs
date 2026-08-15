@@ -13,38 +13,38 @@
  * - `Symbol.dispose` / `Symbol.asyncDispose`: required by down-leveled `using`
  *   declarations under tsx on Node 18.
  *
+ * This file is plain ESM JavaScript (no TypeScript) so it can be loaded via
+ * `node --import` on Node 18 *before* the tsx loader registers, guaranteeing the
+ * shims exist before any `.ts` module (including tsx itself) is evaluated.
+ *
  * Inject via the source launcher, e.g.
- *   node --import tsx/esm --import ./scripts/node18-polyfills.ts apps/cli/src/bin.ts
+ *   node --import ./scripts/node18-polyfills.mjs --import tsx/esm apps/cli/src/bin.ts
  */
 import { createRequire } from 'node:module'
 
-export function makeWithResolvers<T>(): {
-  promise: Promise<T>
-  resolve: (value: T | PromiseLike<T>) => void
-  reject: (reason?: unknown) => void
-} {
-  let resolve!: (value: T | PromiseLike<T>) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((res, rej) => {
+export function makeWithResolvers() {
+  let resolve
+  let reject
+  const promise = new Promise((res, rej) => {
     resolve = res
     reject = rej
   })
   return { promise, resolve, reject }
 }
 
-export function makeGetBuiltinModule(): (id: string) => unknown {
+export function makeGetBuiltinModule() {
   const requireFn = createRequire(import.meta.url)
-  return (id: string) => requireFn(id)
+  return (id) => requireFn(id)
 }
 
-export function installNode18Polyfills(): void {
-  const P = Promise as unknown as { withResolvers?: typeof makeWithResolvers }
+export function installNode18Polyfills() {
+  const P = Promise
   if (typeof P.withResolvers !== 'function') P.withResolvers = makeWithResolvers
 
-  const proc = process as unknown as { getBuiltinModule?: (id: string) => unknown }
+  const proc = process
   if (typeof proc.getBuiltinModule !== 'function') proc.getBuiltinModule = makeGetBuiltinModule()
 
-  const Sym = Symbol as unknown as { dispose?: symbol; asyncDispose?: symbol }
+  const Sym = Symbol
   if (typeof Sym.dispose !== 'symbol') Sym.dispose = Symbol.for('nodejs.dispose')
   if (typeof Sym.asyncDispose !== 'symbol') Sym.asyncDispose = Symbol.for('nodejs.asyncDispose')
 }

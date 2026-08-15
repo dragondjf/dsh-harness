@@ -54,6 +54,7 @@
     "@deepseek-ai/dsh-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-persistence-sqlite": "workspace:^",
     "@deepseek-ai/dsh-session-query": "workspace:^",
-    "@deepseek-ai/cordis": "workspace:^"
+    "@deepseek-ai/cordis": "workspace:^",
+    "@types/better-sqlite3": "^7.6.0"
   }
 }

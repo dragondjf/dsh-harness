@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { installNode18Polyfills, makeGetBuiltinModule, makeWithResolvers } from './node18-polyfills.ts'
+import { installNode18Polyfills, makeGetBuiltinModule, makeWithResolvers } from './node18-polyfills.mjs'
 
 describe('node18 polyfills', () => {
   it('makeWithResolvers resolves and rejects per spec', async () => {

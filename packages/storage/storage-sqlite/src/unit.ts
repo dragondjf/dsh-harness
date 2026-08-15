@@ -8,7 +8,7 @@
  */
 
 import type Database from 'better-sqlite3'
-type Statement = ReturnType<Database['prepare']>
+type Statement = Database.Statement
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnit, KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
 import { recordTableName } from './schema.ts'
@@ -37,7 +37,7 @@ export class SqliteKvUnit implements KvUnit {
    * @param onClose - Backend callback releasing this unit's open-name slot.
    */
   constructor(
-    db: Database,
+    db: Database.Database,
     private readonly descriptor: KvUnitDescriptor,
     private readonly onClose: () => void,
   ) {
