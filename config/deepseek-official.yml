@@ -1,0 +1,15 @@
+# Overlay: use DeepSeek official API (https://api.deepseek.com).
+# Apply with: dsh --profile web --patch config/deepseek-official.yml
+# Secrets are NEVER stored here — the key is read from the DEEPSEEK_API_KEY
+# environment variable (or repo-root .env) at runtime via `apiKeyEnv`.
+- id: llm-deepseek
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    baseURL: https://api.deepseek.com
+    thinking: disabled
+    reasoningEffort: off
+    maxTokens: 32768
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-flash
