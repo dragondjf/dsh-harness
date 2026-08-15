@@ -6,7 +6,7 @@
  * @module @deepseek-ai/dsh-storage-sqlite/schema
  */
 
-import { DatabaseSync } from 'node:sqlite'
+import Database from 'better-sqlite3'
 import { mkdir, open } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { StorageError } from '@deepseek-ai/dsh-storage'
@@ -36,7 +36,7 @@ export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 /**
  * Exclusively create a missing database file with owner-only permissions.
  * Existing files retain their modes, and errors other than `EEXIST` propagate.
- * `DatabaseSync` reopens by path, so this does not protect confidentiality or
+ * `Database` reopens by path, so this does not protect confidentiality or
  * integrity when another principal can replace the database entry in its
  * parent directory.
  */
@@ -58,13 +58,13 @@ async function createDatabaseFile(path: string): Promise<void> {
  * @param journalMode - validated journal pragma.
  * @returns the open handle with pragmas applied and the unit metadata tables ensured.
  */
-export async function openDatabase(path: string, journalMode: JournalMode): Promise<DatabaseSync> {
+export async function openDatabase(path: string, journalMode: JournalMode): Promise<Database> {
   const actual = path === ':memory:' ? path : resolve(path)
   if (actual !== ':memory:') {
     await mkdir(dirname(actual), { recursive: true, mode: 0o700 })
     await createDatabaseFile(actual)
   }
-  const db = new DatabaseSync(actual)
+  const db = new Database(actual)
   try {
     configureDatabase(db, actual, journalMode)
     return db
@@ -74,7 +74,7 @@ export async function openDatabase(path: string, journalMode: JournalMode): Prom
   }
 }
 
-function configureDatabase(db: DatabaseSync, path: string, journalMode: JournalMode): void {
+function configureDatabase(db: Database, path: string, journalMode: JournalMode): void {
   db.exec('PRAGMA foreign_keys = ON')
   // The validated union is safe to interpolate into a non-bindable PRAGMA.
   db.exec(`PRAGMA journal_mode = ${journalMode.toUpperCase()}`)

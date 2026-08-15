@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import Database from 'better-sqlite3'
 import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import type { KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
 import { runKvBackendContract } from '../../storage/tests/contract.ts'
@@ -57,7 +57,7 @@ describe('sqlite backend specifics', () => {
     await unit.putRecord('records', 'k', { n: 1 })
     await backend.close()
 
-    const db = new DatabaseSync(path)
+    const db = new Database(path)
     try {
       const { user_version: version } = db.prepare('PRAGMA user_version').get() as { user_version: number }
       expect(version).toBe(STORAGE_SQLITE_SCHEMA_VERSION)
@@ -74,7 +74,7 @@ describe('sqlite backend specifics', () => {
 
   it('rejects a mismatched database schema version', async () => {
     const path = await freshDbPath()
-    const db = new DatabaseSync(path)
+    const db = new Database(path)
     db.exec('PRAGMA user_version = 999')
     db.close()
 
@@ -128,7 +128,7 @@ describe('sqlite backend specifics', () => {
     const path = await freshDbPath()
     // Obstruct table creation: an index squatting on the unit_globals name
     // makes CREATE TABLE IF NOT EXISTS throw AFTER the units table exists.
-    const setup = new DatabaseSync(path)
+    const setup = new Database(path)
     setup.exec('CREATE TABLE squatter (x TEXT)')
     setup.exec('CREATE INDEX unit_globals ON squatter(x)')
     setup.close()
@@ -139,7 +139,7 @@ describe('sqlite backend specifics', () => {
 
     // Clear the obstruction; the medium must still be version 0, not a
     // half-materialized database stamped as current.
-    const repair = new DatabaseSync(path)
+    const repair = new Database(path)
     expect((repair.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(0)
     repair.exec('DROP INDEX unit_globals')
     repair.close()
@@ -158,7 +158,7 @@ describe('sqlite backend specifics', () => {
     await unit.setGlobal({ g: 1 })
     await backend.close()
 
-    const db = new DatabaseSync(path)
+    const db = new Database(path)
     db.prepare('UPDATE u_specimen_records SET value = ? WHERE key = ?').run('{not json', 'good')
     db.close()
 
@@ -257,7 +257,7 @@ describe('sqlite backend specifics', () => {
     await unit.setGlobal({ g: 1 })
     await backend.close()
 
-    const db = new DatabaseSync(path)
+    const db = new Database(path)
     db.prepare('UPDATE unit_globals SET value = ? WHERE unit = ?').run('][', 'specimen')
     db.close()
 

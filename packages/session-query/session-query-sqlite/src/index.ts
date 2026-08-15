@@ -5,7 +5,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import type { DatabaseSync } from 'node:sqlite'
+import type Database from 'better-sqlite3'
 import { Context, Service, type Fiber } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
@@ -216,7 +216,7 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
 
   private readonly _instance = randomUUID()
   private _ready: Promise<void> | undefined
-  private _db: DatabaseSync | undefined
+  private _db: Database | undefined
   private _persistenceBinding: PersistenceBinding = { identity: Symbol() }
   private _lastPersistenceIdentity: symbol | undefined
   private _persistenceEpoch = 0
@@ -749,7 +749,7 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     }
   }
 
-  private _requireDb(): DatabaseSync {
+  private _requireDb(): Database {
     /* v8 ignore next -- callers await `_ready`; this guards lifecycle misuse */
     if (this._db === undefined) throw indexClosed()
     return this._db

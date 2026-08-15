@@ -1,7 +1,7 @@
 import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
-import { DatabaseSync } from 'node:sqlite'
+import Database from 'better-sqlite3'
 import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -1106,7 +1106,7 @@ describe('SQLite reconciliation and source lifecycle', () => {
     await firstSearch.dispose()
     await firstPersistence.dispose()
 
-    const beforeDb = new DatabaseSync(path)
+    const beforeDb = new Database(path)
     const beforeRows = beforeDb.prepare('SELECT id, generation FROM persisted_sessions ORDER BY id').all() as Array<{ id: string; generation: number }>
     beforeDb.close()
     const before = new Map(beforeRows.map(row => [row.id, row.generation]))
@@ -1130,7 +1130,7 @@ describe('SQLite reconciliation and source lifecycle', () => {
     await secondSearch.dispose()
     await secondPersistence.dispose()
 
-    const afterDb = new DatabaseSync(path)
+    const afterDb = new Database(path)
     const afterRows = afterDb.prepare('SELECT id, generation FROM persisted_sessions ORDER BY id').all() as Array<{ id: string; generation: number }>
     afterDb.close()
     const after = new Map(afterRows.map(row => [row.id, row.generation]))
@@ -1204,7 +1204,7 @@ describe('SQLite reconciliation and source lifecycle', () => {
 
     const live = ctx.sessions.create(SessionId('live'), { seed: messageEvents('base') })
     await ctx.sessionQuery.searchEvents({ sessionId: live.id, query: 'base' })
-    const db = (ctx.sessionQuery as unknown as { _db: DatabaseSync })._db
+    const db = (ctx.sessionQuery as unknown as { _db: Database })._db
     db.exec('PRAGMA query_only = ON')
     live.append('user/message', createUserMessage({
       content: [{ type: 'text', text: 'retry needle' }], source: { kind: 'user' },
@@ -1275,14 +1275,14 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     const stalePath = await temporaryPath('stale.db')
     const staleOwner = await liveContext({ path: stalePath })
     await (staleOwner.sessionQuery as SqliteSessionQueryEngine).close()
-    const stale = new DatabaseSync(stalePath)
+    const stale = new Database(stalePath)
     stale.exec(`PRAGMA user_version = ${SESSION_QUERY_SQLITE_SCHEMA_VERSION - 1}`)
     stale.close()
     const staleCtx = await liveContext({ path: stalePath })
     staleCtx.sessions.create(SessionId('live'), { seed: messageEvents('needle') })
     await staleCtx.sessionQuery.searchSessions({ query: 'needle' })
     await (staleCtx.sessionQuery as SqliteSessionQueryEngine).close()
-    const rebuilt = new DatabaseSync(stalePath)
+    const rebuilt = new Database(stalePath)
     expect((rebuilt.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
       .toBe(SESSION_QUERY_SQLITE_SCHEMA_VERSION)
     rebuilt.close()
@@ -1290,7 +1290,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     const augmentedPath = await temporaryPath('augmented.db')
     const augmentedOwner = await liveContext({ path: augmentedPath })
     await (augmentedOwner.sessionQuery as SqliteSessionQueryEngine).close()
-    const augmented = new DatabaseSync(augmentedPath)
+    const augmented = new Database(augmentedPath)
     augmented.exec('CREATE TABLE unrelated(value TEXT)')
     augmented.exec("INSERT INTO unrelated VALUES ('safe')")
     augmented.exec('PRAGMA user_version = 999')
@@ -1300,7 +1300,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     await expect(augmentedCtx.plugin(SqliteSessionQueryEngine, { path: augmentedPath }))
       .rejects.toThrow(expectCode('SESSION_QUERY_INDEX_FAILED'))
     expect(augmentedCtx.sessionQuery).toBeUndefined()
-    const stillAugmented = new DatabaseSync(augmentedPath)
+    const stillAugmented = new Database(augmentedPath)
     expect(stillAugmented.prepare('SELECT value FROM unrelated').get()).toEqual({ value: 'safe' })
     expect(stillAugmented.prepare('PRAGMA user_version').get()).toEqual({ user_version: 999 })
     stillAugmented.close()
@@ -1308,7 +1308,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     const currentAugmentedPath = await temporaryPath('current-augmented.db')
     const currentAugmentedOwner = await liveContext({ path: currentAugmentedPath })
     await (currentAugmentedOwner.sessionQuery as SqliteSessionQueryEngine).close()
-    const currentAugmented = new DatabaseSync(currentAugmentedPath)
+    const currentAugmented = new Database(currentAugmentedPath)
     currentAugmented.exec('CREATE TABLE unrelated(value TEXT)')
     currentAugmented.exec("INSERT INTO unrelated VALUES ('safe')")
     currentAugmented.close()
@@ -1319,7 +1319,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
       journalMode: 'delete',
     })).rejects.toThrow(expectCode('SESSION_QUERY_INDEX_FAILED'))
     expect(currentAugmentedCtx.sessionQuery).toBeUndefined()
-    const stillCurrentAugmented = new DatabaseSync(currentAugmentedPath)
+    const stillCurrentAugmented = new Database(currentAugmentedPath)
     expect(stillCurrentAugmented.prepare('SELECT value FROM unrelated').get()).toEqual({ value: 'safe' })
     expect(stillCurrentAugmented.prepare('PRAGMA user_version').get())
       .toEqual({ user_version: SESSION_QUERY_SQLITE_SCHEMA_VERSION })
@@ -1327,7 +1327,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     stillCurrentAugmented.close()
 
     const foreignPath = await temporaryPath('foreign.db')
-    const foreign = new DatabaseSync(foreignPath)
+    const foreign = new Database(foreignPath)
     foreign.exec('PRAGMA journal_mode = WAL')
     foreign.exec('CREATE TABLE canonical(value TEXT)')
     foreign.exec("INSERT INTO canonical VALUES ('safe')")
@@ -1337,13 +1337,13 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     await expect(foreignCtx.plugin(SqliteSessionQueryEngine, { path: foreignPath, journalMode: 'delete' }))
       .rejects.toThrow(expectCode('SESSION_QUERY_INDEX_FAILED'))
     expect(foreignCtx.sessionQuery).toBeUndefined()
-    const stillForeign = new DatabaseSync(foreignPath)
+    const stillForeign = new Database(foreignPath)
     expect(stillForeign.prepare('SELECT value FROM canonical').get()).toEqual({ value: 'safe' })
     expect(stillForeign.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' })
     stillForeign.close()
 
     const wildcardPath = await temporaryPath('sqlite-wildcard.db')
-    const wildcard = new DatabaseSync(wildcardPath)
+    const wildcard = new Database(wildcardPath)
     wildcard.exec('PRAGMA journal_mode = WAL')
     wildcard.exec('CREATE TABLE sqliteX(value TEXT)')
     wildcard.exec("INSERT INTO sqliteX VALUES ('safe')")
@@ -1355,7 +1355,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
       journalMode: 'delete',
     })).rejects.toThrow(expectCode('SESSION_QUERY_INDEX_FAILED'))
     expect(wildcardCtx.sessionQuery).toBeUndefined()
-    const stillWildcard = new DatabaseSync(wildcardPath)
+    const stillWildcard = new Database(wildcardPath)
     expect(stillWildcard.prepare('SELECT value FROM sqliteX').get()).toEqual({ value: 'safe' })
     expect(stillWildcard.prepare('PRAGMA application_id').get()).toEqual({ application_id: 0 })
     expect(stillWildcard.prepare('PRAGMA user_version').get()).toEqual({ user_version: 0 })
@@ -1363,7 +1363,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     stillWildcard.close()
 
     const otherAppPath = await temporaryPath('other-app.db')
-    const otherApp = new DatabaseSync(otherAppPath)
+    const otherApp = new Database(otherAppPath)
     otherApp.exec('PRAGMA application_id = 123')
     otherApp.close()
     const otherAppCtx = new Context()
@@ -1375,7 +1375,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
 
   it('fails plugin initialization without an unhandled rejection or partial service', async () => {
     const path = await temporaryPath('never-queried.db')
-    const foreign = new DatabaseSync(path)
+    const foreign = new Database(path)
     foreign.exec('CREATE TABLE canonical(value TEXT)')
     foreign.close()
     const unhandled: unknown[] = []
@@ -1396,7 +1396,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
 
   it('defers an invalid database failure only in first-search mode', async () => {
     const path = await temporaryPath('lazy-invalid.db')
-    const foreign = new DatabaseSync(path)
+    const foreign = new Database(path)
     foreign.exec('CREATE TABLE canonical(value TEXT)')
     foreign.close()
 
@@ -1642,7 +1642,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     releaseActive()
     await expect(active).rejects.toThrow(expectCode('SESSION_QUERY_ABORTED'))
 
-    const db = (ctx.sessionQuery as unknown as { _db: DatabaseSync })._db
+    const db = (ctx.sessionQuery as unknown as { _db: Database })._db
     expect(db.prepare('SELECT COUNT(*) AS count FROM persisted_sessions').get()).toEqual({ count: 0 })
     await expect(ctx.sessionQuery.searchSessions({ query: 'needle' }))
       .resolves.toMatchObject({ items: [{ header: { id: SessionId('uncommitted') } }] })
@@ -1670,7 +1670,7 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     TestPersistence.reset()
     const ctx = await liveContext()
     const internals = ctx.sessionQuery as unknown as {
-      _db: DatabaseSync
+      _db: Database
       _ready: Promise<void>
       _ensureReady(signal: AbortSignal | undefined): Promise<void>
     }

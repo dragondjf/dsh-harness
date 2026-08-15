@@ -7,16 +7,17 @@
  * @module @deepseek-ai/dsh-storage-sqlite/unit
  */
 
-import type { DatabaseSync, StatementSync } from 'node:sqlite'
+import type Database from 'better-sqlite3'
+type Statement = ReturnType<Database['prepare']>
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnit, KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
 import { recordTableName } from './schema.ts'
 
 /** Prepared statements for one declared table. */
 interface TableStatements {
-  upsert: StatementSync
-  remove: StatementSync
-  selectAll: StatementSync
+  upsert: Statement
+  remove: Statement
+  selectAll: Statement
 }
 
 /**
@@ -26,8 +27,8 @@ interface TableStatements {
  */
 export class SqliteKvUnit implements KvUnit {
   private readonly tables = new Map<string, TableStatements>()
-  private readonly globalUpsert: StatementSync | undefined
-  private readonly globalSelect: StatementSync | undefined
+  private readonly globalUpsert: Statement | undefined
+  private readonly globalSelect: Statement | undefined
   private closed = false
 
   /**
@@ -36,7 +37,7 @@ export class SqliteKvUnit implements KvUnit {
    * @param onClose - Backend callback releasing this unit's open-name slot.
    */
   constructor(
-    db: DatabaseSync,
+    db: Database,
     private readonly descriptor: KvUnitDescriptor,
     private readonly onClose: () => void,
   ) {

@@ -10,7 +10,7 @@ import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
-import { DatabaseSync } from 'node:sqlite'
+import Database from 'better-sqlite3'
 import { mkdir, open } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import {
@@ -53,7 +53,7 @@ function sqliteRevision(storeIdentity: string, row: SessionRow): PersistenceRevi
 /**
  * Exclusively create a missing database file with owner-only permissions.
  * Existing files retain their modes, and errors other than `EEXIST` propagate.
- * `DatabaseSync` reopens by path, so this does not protect confidentiality or
+ * `Database` reopens by path, so this does not protect confidentiality or
  * integrity when another principal can replace the database entry in its parent
  * directory.
  */
@@ -116,7 +116,7 @@ export class SqliteSessionPersistence extends SessionPersistence implements Pers
    */
   override readonly name = 'session-persistence-sqlite'
 
-  private db!: DatabaseSync
+  private db!: Database
   private storeIdentity!: string
   private ready: Promise<void>
   private coordinator: PersistenceCoordinator<number>

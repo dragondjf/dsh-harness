@@ -7,7 +7,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { DatabaseSync } from 'node:sqlite'
+import type Database from 'better-sqlite3'
 import { StorageError, UNIT_NAME_RE, storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import type { KvFacet, KvUnit, KvUnitDescriptor, StorageBackend } from '@deepseek-ai/dsh-storage'
 import { openDatabase, recordTableName, type JournalMode } from './schema.ts'
@@ -48,7 +48,7 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * The SQLite {@link StorageBackend}. Owns one `DatabaseSync` connection and
+ * The SQLite {@link StorageBackend}. Owns one `Database` connection and
  * the open-unit table; `kv.open` validates names, enforces the per-unit
  * version stamp in `units`, and ensures the unit's record tables.
  */
@@ -56,7 +56,7 @@ export class SqliteStorageBackend implements StorageBackend {
   /** The key-value facet; the only shape this backend serves. */
   readonly kv: KvFacet = { open: descriptor => this.openUnit(descriptor) }
 
-  private readonly ready: Promise<DatabaseSync>
+  private readonly ready: Promise<Database>
   /** Open (or still-opening) units by name; presence is the double-open guard. */
   private readonly units = new Map<string, Promise<SqliteKvUnit>>()
   private closing: Promise<void> | undefined
@@ -133,7 +133,7 @@ export class SqliteStorageBackend implements StorageBackend {
   }
 
   private async doClose(): Promise<void> {
-    let db: DatabaseSync
+    let db: Database
     try {
       db = await this.ready
     } catch {

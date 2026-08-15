@@ -1,6 +1,6 @@
 /** SQLite schema for the disposable session full-text read model. */
 
-import type { DatabaseSync } from 'node:sqlite'
+import type Database from 'better-sqlite3'
 import { mkdir, open } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
@@ -43,14 +43,14 @@ async function createDatabaseFile(path: string): Promise<void> {
  * @param journalMode - validated SQLite journal mode.
  * @returns initialized database handle owned by the search service.
  */
-export async function openSearchDatabase(path: string, journalMode: JournalMode): Promise<DatabaseSync> {
+export async function openSearchDatabase(path: string, journalMode: JournalMode): Promise<Database> {
   const actual = path === ':memory:' ? path : resolve(path)
   if (actual !== ':memory:') {
     await mkdir(dirname(actual), { recursive: true, mode: 0o700 })
     await createDatabaseFile(actual)
   }
-  const { DatabaseSync } = await import('node:sqlite')
-  const db = new DatabaseSync(actual)
+  const Database = (await import('better-sqlite3')).default
+  const db = new Database(actual)
   try {
     const { application_id: applicationId } = db.prepare('PRAGMA application_id').get() as { application_id: number }
     const { user_version: version } = db.prepare('PRAGMA user_version').get() as { user_version: number }
@@ -77,7 +77,7 @@ export async function openSearchDatabase(path: string, journalMode: JournalMode)
   }
 }
 
-function listUserTables(db: DatabaseSync): string[] {
+function listUserTables(db: Database): string[] {
   const rows = db.prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*' ORDER BY name",
   ).all() as Array<{ name: string }>
@@ -93,14 +93,14 @@ function assertDerivedUserTables(path: string, userTables: readonly string[]): v
   }
 }
 
-function resetDerivedSchema(db: DatabaseSync, userTables: readonly string[]): void {
+function resetDerivedSchema(db: Database, userTables: readonly string[]): void {
   for (const name of userTables) {
     db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(name)}`)
   }
   db.exec('PRAGMA user_version = 0')
 }
 
-function ensurePersistentSchema(db: DatabaseSync): void {
+function ensurePersistentSchema(db: Database): void {
   db.exec(`PRAGMA application_id = ${SESSION_QUERY_SQLITE_APPLICATION_ID}`)
   db.exec(`
     CREATE TABLE IF NOT EXISTS search_state (
@@ -138,7 +138,7 @@ function ensurePersistentSchema(db: DatabaseSync): void {
   db.exec(`PRAGMA user_version = ${SESSION_QUERY_SQLITE_SCHEMA_VERSION}`)
 }
 
-function ensureTemporarySchema(db: DatabaseSync): void {
+function ensureTemporarySchema(db: Database): void {
   db.exec(`
     CREATE TEMP TABLE IF NOT EXISTS live_sessions (
       id             TEXT PRIMARY KEY,
