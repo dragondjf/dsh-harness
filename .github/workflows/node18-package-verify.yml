@@ -108,13 +108,13 @@ jobs:
             --patch config/deepseek-official.yml \
             --host 127.0.0.1 --port 3080 > /tmp/dsh.log 2>&1 &
           code=""
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/ || true)
             [ "$code" = "200" ] && break
             sleep 1
           done
           echo "HTTP after boot: $code"
-          [ "$code" = "200" ] || { echo "::error::server did not reach 200"; tail -30 /tmp/dsh.log; exit 1; }
+          [ "$code" = "200" ] || { echo "::error::server did not reach 200"; echo "--- dsh.log ---"; tail -30 /tmp/dsh.log; echo "--- dsh.err ---"; tail -30 /tmp/dsh.err; exit 1; }
 
       - name: Boot package (Windows)
         if: runner.os == 'Windows'
@@ -134,12 +134,21 @@ jobs:
           ) -RedirectStandardOutput "$env:TEMP/dsh.log" -RedirectStandardError "$env:TEMP/dsh.err" -PassThru
           "PKG_PID=$($p.Id)" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
           $ok = $false
-          for ($i = 0; $i -lt 60; $i++) {
+          for ($i = 0; $i -lt 90; $i++) {
             try { $r = Invoke-WebRequest -Uri http://127.0.0.1:3080/ -UseBasicParsing -TimeoutSec 2
                   if ($r.StatusCode -eq 200) { $ok = $true; break } } catch {}
             Start-Sleep -Seconds 1
           }
-          if (-not $ok) { Write-Error "server did not reach 200"; Get-Content "$env:TEMP/dsh.log" -Tail 30; exit 1 }
+          if (-not $ok) {
+            Write-Error "server did not reach 200"
+            Write-Host "=== dsh.log (stdout) ==="; Get-Content "$env:TEMP/dsh.log" -Tail 40 -ErrorAction SilentlyContinue
+            Write-Host "=== dsh.err (stderr) ==="; Get-Content "$env:TEMP/dsh.err" -Tail 40 -ErrorAction SilentlyContinue
+            $pr = Get-Process -Id $env:PKG_PID -ErrorAction SilentlyContinue
+            Write-Host "package node alive: $(-not [string]::IsNullOrEmpty($pr))"
+            $binExists = Test-Path "$pkg/apps/cli/lib/bin.js"
+            Write-Host "apps/cli/lib/bin.js exists: $binExists"
+            exit 1
+          }
           Write-Host "HTTP after boot: 200"
 
       - name: Install Playwright + Chromium (Linux, with deps)
