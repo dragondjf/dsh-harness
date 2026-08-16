@@ -48,7 +48,7 @@ cd "$REPO_ROOT"
 # ---- node: prefer an explicit Node 18+ ----
 NODE_BIN="${DSH_NODE_BIN:-}"
 if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
-  for cand in /home/yfjz/node18/bin/node "$REPO_ROOT/node18/bin/node"; do
+  for cand in "$REPO_ROOT/node18/bin/node"; do
     if [[ -x "$cand" ]]; then NODE_BIN="$cand"; break; fi
   done
 fi

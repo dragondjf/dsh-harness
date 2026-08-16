@@ -152,7 +152,7 @@ jobs:
           fi
           tar -cf - $TARFLAGS \
             --exclude='.git' --exclude='.github' --exclude='node18' \
-            --exclude='*/src' --exclude='node_modules/.cache' \
+            --exclude='node_modules/.cache' \
             --exclude='*/*/node_modules' \
             --exclude='coverage' --exclude='dist-exe' --exclude='dist-python' \
             . | (cd "$PKG" && tar -xf -)
@@ -167,29 +167,57 @@ jobs:
           # on the Windows package, but harmless to copy everywhere.
           cp -f scripts/start.bat "$PKG/start.bat" 2>/dev/null || true
           cp -f scripts/install.bat "$PKG/install.bat" 2>/dev/null || true
+          # Source-mode launchers (run from packages/*/src via tsx) for in-field
+          # fixes of unknown issues without a full rebuild.
+          cp -f scripts/start-src.sh "$PKG/start-src.sh" 2>/dev/null || true
+          cp -f scripts/start-src.ps1 "$PKG/start-src.ps1" 2>/dev/null || true
+          cp -f scripts/start-src.bat "$PKG/start-src.bat" 2>/dev/null || true
           cat > "$PKG/README.md" <<'EOF'
           # dsh — Node 18 green package (${{ matrix.platform }})
 
-          Self-contained: includes its own Node 18 runtime, so no Node install
-          is required on the target machine.
+          Fully self-contained: includes the compiled code, the bundled Node 18
+          runtime (node18/), the full node_modules dependency tree, AND the
+          original TypeScript source (packages/*/src, vendor/, apps/*/src). No
+          Node install or network is required on the target machine.
+
+          ## What's inside
+              node18/            bundled Node 18 runtime (node18/bin/node or node18/node.exe)
+              node_modules/      all dependencies (root, hoisted by pnpm)
+              packages/*/lib     compiled JS (what runs by default)
+              packages/*/src     TypeScript source (for in-field fixes)
+              vendor/            vendored Cordis source
+              apps/web/dist      built web UI
+              start-dsh.*        run from compiled lib/ (default)
+              start-src.*        run from source via tsx (fix unknown issues)
+              install.bat        Windows: write .env with your API key
 
           ## Run (Linux / macOS)
               cd dsh-node18-${{ matrix.platform }}
               ./start-dsh.sh                 # web UI on http://127.0.0.1:3080
               DSH_PORT=8080 ./start-dsh.sh   # custom port
+              ./start-src.sh                 # source mode (edit src/ to fix)
 
           ## Run (Windows, cmd.exe — no PowerShell needed)
               cd dsh-node18-${{ matrix.platform }}
               install.bat            # first run: writes .env with your API key
               start.bat              # boot web UI on http://127.0.0.1:3080
+              start-src.bat          # source mode (edit src/ to fix)
 
           ## Run (Windows, PowerShell)
               cd dsh-node18-${{ matrix.platform }}
               pwsh ./scripts/start-dsh.ps1
+              pwsh ./scripts/start-src.ps1   # source mode
+
+          ## Source mode (fix an unknown issue without a rebuild)
+          start-src.* boots the CLI from packages/apps/cli/src/bin.ts through
+          tsx, so edits to any packages/*/src/*.ts take effect on next launch
+          without `pnpm build`. Other workspace packages still resolve via their
+          built lib/ (pnpm symlinks); to rebuild everything run `pnpm build:lib`
+          (devDependencies like tsx/tsdown are included in node_modules).
 
           ## Configure the LLM provider
           The default overlay is config/deepseek-official.yml, which reads the
-          API key from the DEEPSEEK_API_KEY environment variable:
+          API key from the DEEPSEEK_API_KEY environment variable or a .env file:
               export DEEPSEEK_API_KEY=...    # then start
           EOF
           echo "Package tree (top):"
