@@ -29,6 +29,11 @@ concurrency:
 
 env:
   DSH_TELEMETRY_DISABLED: '1'
+  # This workflow has NO checkout step (it only downloads a published release),
+  # so `gh` cannot auto-detect the repo from a .git dir. Pin GH_REPO + token
+  # explicitly so every `gh` call works without git.
+  GH_REPO: dragondjf/dsh-harness
+  GH_TOKEN: ${{ github.token }}
 
 jobs:
   verify:
@@ -53,12 +58,10 @@ jobs:
       - name: Resolve release tag
         id: tag
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ github.event.inputs.tag }}"
           if [ -z "$TAG" ]; then
-            TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || true)
+            TAG=$(gh api repos/$GH_REPO/releases/latest --jq .tag_name 2>/dev/null || true)
           fi
           if [ -z "$TAG" ]; then echo "::error::no release tag found"; exit 1; fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -66,8 +69,6 @@ jobs:
 
       - name: Download release asset
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/dl
           gh release download "${{ steps.tag.outputs.tag }}" \
