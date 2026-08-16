@@ -218,12 +218,14 @@ jobs:
           Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force
 
       # ---- Optional: full tool-call e2e (only when the API key secret exists) ----
-      # NOTE: `if` cannot see a step's own `env:`, so gate on the secret directly.
+      # GitHub Actions forbids `secrets` in a step `if:` expression, so we
+      # surface the secret's presence as an env var and gate on that instead.
       - name: E2E tool-call suite (needs DEEPSEEK_API_KEY_EXTERNAL)
-        if: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL != '' }}
+        if: ${{ env.DEEPSEEK_KEY_PRESENT == 'true' }}
         shell: bash
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
+          DEEPSEEK_KEY_PRESENT: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL != '' }}
         run: pnpm run test:e2e
 
       # ---- Package the archive ----
