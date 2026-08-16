@@ -35,7 +35,8 @@ concurrency:
 env:
   NODE18_VERSION: '18.20.8'
   NODE24_VERSION: '24'
-  PNPM_VERSION: '9.15.0'        # pnpm 10+ refuses Node 18; 9.x is the Node-18-compatible line
+  PNPM_VERSION: '11.7.0'        # matches package.json packageManager; action-setup reads
+                                # packageManager automatically when `version` is omitted
   DSH_TELEMETRY_DISABLED: '1'
 
 jobs:
@@ -64,8 +65,8 @@ jobs:
 
       - name: Setup pnpm ${{ env.PNPM_VERSION }}
         uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
+        # No `version:` → reads packageManager (pnpm@11.7.0) from package.json,
+        # avoiding ERR_PNPM_BAD_PM_VERSION from a second pinned version.
 
       # Native addons are compiled/selected for the active Node (18) here, so
       # they match the bundled Node 18 runtime shipped in the package.
