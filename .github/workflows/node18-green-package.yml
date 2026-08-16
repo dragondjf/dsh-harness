@@ -34,9 +34,12 @@ concurrency:
 
 env:
   NODE18_VERSION: '18.20.8'
-  NODE24_VERSION: '24'
-  PNPM_VERSION: '11.7.0'        # matches package.json packageManager; action-setup reads
-                                # packageManager automatically when `version` is omitted
+  NODE22_VERSION: '22'
+  # pnpm 9.x is the only line that runs on BOTH Node 18 (native-addon ABI
+  # build) and Node 22 (rolldown backend build). pnpm 10+ requires Node >=22.13
+  # and therefore cannot drive the Node-18 install step. Must match
+  # package.json packageManager to avoid ERR_PNPM_BAD_PM_VERSION.
+  PNPM_VERSION: '9.15.0'
   DSH_TELEMETRY_DISABLED: '1'
 
 jobs:
@@ -65,21 +68,21 @@ jobs:
 
       - name: Setup pnpm ${{ env.PNPM_VERSION }}
         uses: pnpm/action-setup@v4
-        # No `version:` → reads packageManager (pnpm@11.7.0) from package.json,
-        # avoiding ERR_PNPM_BAD_PM_VERSION from a second pinned version.
+        with:
+          version: ${{ env.PNPM_VERSION }}
 
       # Native addons are compiled/selected for the active Node (18) here, so
       # they match the bundled Node 18 runtime shipped in the package.
       - name: Install dependencies (Node 18)
-        run: pnpm install --prefer-frozen-lockfile
+        run: pnpm install --no-lockfile
 
-      # ---- Node 24 toolchain: backend build (rolldown needs Node 22+) ----
-      - name: Setup Node ${{ env.NODE24_VERSION }}
+      # ---- Node 22 toolchain: backend build (rolldown needs Node 22+) ----
+      - name: Setup Node ${{ env.NODE22_VERSION }}
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ env.NODE24_VERSION }}
+          node-version: ${{ env.NODE22_VERSION }}
 
-      - name: Build backend lib (Node 24)
+      - name: Build backend lib (Node 22)
         run: pnpm run build:lib
 
       # ---- Back to Node 18 for frontend build + runtime ----
