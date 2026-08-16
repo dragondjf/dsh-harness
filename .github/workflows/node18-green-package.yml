@@ -163,6 +163,10 @@ jobs:
           # (and the README) hold in the shipped package.
           cp -f scripts/start-dsh.sh "$PKG/start-dsh.sh"
           cp -f scripts/start-dsh.ps1 "$PKG/start-dsh.ps1" 2>/dev/null || true
+          # Windows cmd.exe launchers (no PowerShell needed) — only meaningful
+          # on the Windows package, but harmless to copy everywhere.
+          cp -f scripts/start.bat "$PKG/start.bat" 2>/dev/null || true
+          cp -f scripts/install.bat "$PKG/install.bat" 2>/dev/null || true
           cat > "$PKG/README.md" <<'EOF'
           # dsh — Node 18 green package (${{ matrix.platform }})
 
@@ -173,6 +177,11 @@ jobs:
               cd dsh-node18-${{ matrix.platform }}
               ./start-dsh.sh                 # web UI on http://127.0.0.1:3080
               DSH_PORT=8080 ./start-dsh.sh   # custom port
+
+          ## Run (Windows, cmd.exe — no PowerShell needed)
+              cd dsh-node18-${{ matrix.platform }}
+              install.bat            # first run: writes .env with your API key
+              start.bat              # boot web UI on http://127.0.0.1:3080
 
           ## Run (Windows, PowerShell)
               cd dsh-node18-${{ matrix.platform }}
