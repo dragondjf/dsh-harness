@@ -60,36 +60,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # ---- Node 18 toolchain: install + runtime ABI ----
-      - name: Setup Node ${{ env.NODE18_VERSION }}
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.NODE18_VERSION }}
-
+      # ---- pnpm: single version that runs on both Node 18 and Node 22 ----
       - name: Setup pnpm ${{ env.PNPM_VERSION }}
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      # Native addons are compiled/selected for the active Node (18) here, so
-      # they match the bundled Node 18 runtime shipped in the package.
-      - name: Install dependencies (Node 18)
-        run: pnpm install --no-lockfile
-
-      # ---- Node 22 toolchain: backend build (rolldown needs Node 22+) ----
+      # ---- Node 22 toolchain: install deps + backend build ----
+      # Install under Node 22 so rolldown's native binding (needs Node 20+) is
+      # fetched; build:lib (rolldown) also requires Node 22+.
       - name: Setup Node ${{ env.NODE22_VERSION }}
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE22_VERSION }}
 
+      - name: Install dependencies (Node 22)
+        run: pnpm install --no-lockfile
+
       - name: Build backend lib (Node 22)
         run: pnpm run build:lib
 
-      # ---- Back to Node 18 for frontend build + runtime ----
-      - name: Setup Node ${{ env.NODE18_VERSION }} (again)
+      # ---- Node 18 toolchain: recompile native addons + frontend build ----
+      # Recompile the native addons (better-sqlite3 / node-pty / lightningcss)
+      # against Node 18 so they match the bundled Node 18 runtime's ABI.
+      # rolldown's binding is build-time-only and platform-specific (not
+      # Node-ABI tied), so leaving it from the Node 22 install is fine.
+      - name: Setup Node ${{ env.NODE18_VERSION }}
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE18_VERSION }}
+
+      - name: Recompile native addons for Node 18 ABI
+        run: pnpm rebuild better-sqlite3 node-pty lightningcss
 
       - name: Build frontend (Node 18, vite)
         run: pnpm run build:web
