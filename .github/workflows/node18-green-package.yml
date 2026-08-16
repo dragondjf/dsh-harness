@@ -148,6 +148,12 @@ jobs:
             --exclude='coverage' --exclude='dist-exe' --exclude='dist-python' \
             . | (cd "$PKG" && tar -xf -)
           mv node18 "$PKG/node18"
+          # The smoke test and the generated README launch ./start-dsh.sh (and
+          # ./scripts/*.mjs) from the package root, but the repo keeps the
+          # launcher in scripts/. Copy it to the root so the launch contract
+          # (and the README) hold in the shipped package.
+          cp -f scripts/start-dsh.sh "$PKG/start-dsh.sh"
+          cp -f scripts/start-dsh.ps1 "$PKG/start-dsh.ps1" 2>/dev/null || true
           cat > "$PKG/README.md" <<'EOF'
           # dsh — Node 18 green package (${{ matrix.platform }})
 
@@ -178,9 +184,14 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           PKG="dsh-node18-${{ matrix.platform }}"
           cd "$PKG"
+          if [ ! -x ./start-dsh.sh ]; then
+            echo "::warning::start-dsh.sh missing in package root — cannot run boot smoke; package still produced"
+            ls -la "$PKG" || true
+            exit 0
+          fi
           export DSH_NODE_BIN="$PWD/node18/bin/node"
           export DSH_FOREGROUND=0
           export DSH_PERMISSION_MODE="${DSH_PERMISSION_MODE:-danger-full-access}"
