@@ -142,11 +142,9 @@ jobs:
           # are symlink forests into the pnpm store (often root-owned,
           # unreadable by the runner) and are not needed at runtime — pnpm
           # hoists everything to the root node_modules, which we keep.
-          # --ignore-failed-read lets tar archive a live tree without aborting
-          # on a file that changes/vanishes mid-archive.
+          # The pkill above stops build-service writers so tar doesn't race a
+          # live tree (portable alternative to GNU-only --ignore-failed-read).
           tar -cf - \
-            --ignore-failed-read \
-            --warning=no-file-changed \
             --exclude='.git' --exclude='.github' --exclude='node18' \
             --exclude='*/src' --exclude='node_modules/.cache' \
             --exclude='*/*/node_modules' \
