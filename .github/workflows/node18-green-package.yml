@@ -128,10 +128,15 @@ jobs:
           rm -rf "$PKG" && mkdir -p "$PKG"
           # Copy the repo, dropping git history, CI-only dirs, and source trees
           # (runtime only needs built lib/ + dist/ + node_modules). The bundled
-          # node18 is added separately below.
+          # node18 is added separately below. Nested workspace node_modules
+          # (vendor/*, packages/*, examples, python/*) are symlink forests into
+          # the pnpm store (often root-owned, unreadable by the runner) and are
+          # not needed at runtime — pnpm hoists everything to the root
+          # node_modules, which we keep. Exclude them so tar can finish.
           tar -cf - \
             --exclude='.git' --exclude='.github' --exclude='node18' \
             --exclude='*/src' --exclude='node_modules/.cache' \
+            --exclude='*/*/node_modules' \
             --exclude='coverage' --exclude='dist-exe' --exclude='dist-python' \
             . | (cd "$PKG" && tar -xf -)
           mv node18 "$PKG/node18"
