@@ -70,17 +70,19 @@ jobs:
       - name: Download release asset
         shell: bash
         run: |
-          mkdir -p /tmp/dl
+          DL="$RUNNER_TEMP/dl"
+          mkdir -p "$DL"
           gh release download "${{ steps.tag.outputs.tag }}" \
             --pattern "dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" \
-            --dir /tmp/dl
-          ls -la /tmp/dl
+            --dir "$DL"
+          echo "DL=$DL" >> "$GITHUB_ENV"
+          ls -la "$DL"
 
       - name: Unpack (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          mkdir -p pkg && tar -xzf /tmp/dl/dsh-node18-${{ matrix.platform }}.${{ matrix.ext }} -C pkg
+          mkdir -p pkg && tar -xzf "$DL/dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" -C pkg
           echo "PKG=$PWD/pkg" >> "$GITHUB_ENV"
 
       - name: Unpack (Windows)
@@ -88,7 +90,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path pkg | Out-Null
-          Expand-Archive -Path "/tmp/dl/dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" -DestinationPath pkg -Force
+          Expand-Archive -Path "$env:DL/dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" -DestinationPath pkg -Force
           "PKG=$PWD/pkg" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
 
       - name: Boot package (Unix)
@@ -98,10 +100,13 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
         run: |
           cd "$PKG"
-          export DSH_NODE_BIN="$PWD/node18/bin/node"
-          export DSH_FOREGROUND=0
           export DSH_PERMISSION_MODE="danger-full-access"
-          ./start-dsh.sh start
+          "$PKG/node18/bin/node" \
+            --import "$PKG/scripts/better-sqlite3-abi-loader.mjs" \
+            --import "$PKG/scripts/node18-polyfills.mjs" \
+            apps/cli/lib/bin.js --profile web \
+            --patch config/deepseek-official.yml \
+            --host 127.0.0.1 --port 3080 > /tmp/dsh.log 2>&1 &
           code=""
           for i in $(seq 1 60); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/ || true)
@@ -109,7 +114,7 @@ jobs:
             sleep 1
           done
           echo "HTTP after boot: $code"
-          [ "$code" = "200" ] || { echo "::error::server did not reach 200"; exit 1; }
+          [ "$code" = "200" ] || { echo "::error::server did not reach 200"; tail -30 /tmp/dsh.log; exit 1; }
 
       - name: Boot package (Windows)
         if: runner.os == 'Windows'
@@ -127,6 +132,7 @@ jobs:
             '--patch', 'config/deepseek-official.yml',
             '--host', '127.0.0.1', '--port', '3080'
           ) -RedirectStandardOutput "$env:TEMP/dsh.log" -RedirectStandardError "$env:TEMP/dsh.err" -PassThru
+          "PKG_PID=$($p.Id)" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
           $ok = $false
           for ($i = 0; $i -lt 60; $i++) {
             try { $r = Invoke-WebRequest -Uri http://127.0.0.1:3080/ -UseBasicParsing -TimeoutSec 2
@@ -162,7 +168,7 @@ jobs:
           import { chromium } from 'playwright';
           const url = process.env.URL;
           const out = process.env.OUT;
-          const browser = await chromium.launch();
+          const browser = await chromium.launch({ args: ['--no-sandbox'] });
           const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
           const resp = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
           if (!resp || resp.status() !== 200) { console.error('HTTP', resp && resp.status()); process.exit(2); }
@@ -194,4 +200,7 @@ jobs:
       - name: Stop server (Windows)
         if: always() && runner.os == 'Windows'
         shell: pwsh
-        run: Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force
+        run: |
+          if ($env:PKG_PID -and (Get-Process -Id $env:PKG_PID -ErrorAction SilentlyContinue)) {
+            Stop-Process -Id $env:PKG_PID -Force
+          }

@@ -48,7 +48,7 @@ cd "$REPO_ROOT"
 # ---- node: prefer an explicit Node 18+ ----
 NODE_BIN="${DSH_NODE_BIN:-}"
 if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
-  for cand in "$REPO_ROOT/node18/bin/node"; do
+  for cand in /home/yfjz/node18/bin/node "$REPO_ROOT/node18/bin/node"; do
     if [[ -x "$cand" ]]; then NODE_BIN="$cand"; break; fi
   done
 fi
@@ -99,7 +99,7 @@ pid_alive() {
 }
 
 preflight() {
-  if [[ ! -x "$ENTRY" ]]; then
+  if [[ ! -f "$ENTRY" ]]; then
     echo "✗ $ENTRY missing. Run 'pnpm install && pnpm build:lib' once," >&2
     echo "  or use source mode: pnpm dsh --profile $PROFILE" >&2
     exit 1
