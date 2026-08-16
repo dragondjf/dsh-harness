@@ -141,12 +141,13 @@ jobs:
           }
           if (-not $ok) {
             Write-Error "server did not reach 200"
-            Write-Host "=== dsh.log (stdout) ==="; Get-Content "$env:TEMP/dsh.log" -Tail 40 -ErrorAction SilentlyContinue
-            Write-Host "=== dsh.err (stderr) ==="; Get-Content "$env:TEMP/dsh.err" -Tail 40 -ErrorAction SilentlyContinue
+            Write-Output "node exists: $(Test-Path $node)"
+            Write-Output "bin.js exists: $(Test-Path $pkg/apps/cli/lib/bin.js)"
+            Write-Output "config exists: $(Test-Path $pkg/config/deepseek-official.yml)"
+            Write-Output "=== dsh.log (stdout) ==="; Get-Content "$env:TEMP/dsh.log" -Tail 60 -ErrorAction SilentlyContinue
+            Write-Output "=== dsh.err (stderr) ==="; Get-Content "$env:TEMP/dsh.err" -Tail 60 -ErrorAction SilentlyContinue
             $pr = Get-Process -Id $env:PKG_PID -ErrorAction SilentlyContinue
-            Write-Host "package node alive: $(-not [string]::IsNullOrEmpty($pr))"
-            $binExists = Test-Path "$pkg/apps/cli/lib/bin.js"
-            Write-Host "apps/cli/lib/bin.js exists: $binExists"
+            Write-Output "package node alive: $(-not [string]::IsNullOrEmpty($pr))"
             exit 1
           }
           Write-Host "HTTP after boot: 200"
@@ -201,10 +202,36 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Upload boot logs (Unix)
+        if: always() && runner.os != 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootlogs-${{ matrix.platform }}
+          path: |
+            /tmp/dsh.log
+            /tmp/dsh.err
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Upload boot logs (Windows)
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootlogs-${{ matrix.platform }}
+          path: |
+            ${{ env.TEMP }}/dsh.log
+            ${{ env.TEMP }}/dsh.err
+          if-no-files-found: warn
+          retention-days: 3
+
       - name: Stop server (Unix)
         if: always() && runner.os != 'Windows'
         shell: bash
-        run: cd "$PKG" && ./start-dsh.sh stop || true
+        run: |
+          if [ -n "$PKG" ] && [ -x "$PKG/start-dsh.sh" ]; then
+            cd "$PKG" && ./start-dsh.sh stop || true
+          fi
+          pkill -f "apps/cli/lib/bin.js" 2>/dev/null || true
 
       - name: Stop server (Windows)
         if: always() && runner.os == 'Windows'
