@@ -124,28 +124,25 @@ jobs:
             node18/bin/node --version
           fi
 
-      # ---- Assemble the green package tree (repo minus .git/src, plus node18/) ----
+      # ---- Assemble the green package tree ----
+      # Built OUTSIDE the repo ($RUNNER_TEMP/pkg) so the tar of "." never
+      # re-includes the package dir itself, and so a step's `cd` cannot drift
+      # the packaging path. PKG is exported as an absolute path for every step.
       - name: Assemble package
         shell: bash
         run: |
           set -euo pipefail
-          PKG="dsh-node18-${{ matrix.platform }}"
-          # Stop lingering build-service processes (esbuild/vite/tsdown spawned
-          # by build:web/build:lib) that may still be writing into node_modules
-          # while we archive, which makes tar see "file changed/removed".
+          PKG="$RUNNER_TEMP/pkg"
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+          rm -rf "$PKG" && mkdir -p "$PKG"
+          # Stop lingering build-service processes (esbuild/vite/tsdown) that
+          # may still be writing into node_modules while we archive.
           pkill -9 -f esbuild || true
           pkill -9 -f vite || true
           pkill -9 -f tsdown || true
-          rm -rf "$PKG" && mkdir -p "$PKG"
-          # Runtime only needs built lib/ + dist/ + node_modules. Nested
-          # workspace node_modules (vendor/*, packages/*, examples, python/*)
-          # are symlink forests into the pnpm store (often root-owned,
-          # unreadable by the runner) and are not needed at runtime — pnpm
-          # hoists everything to the root node_modules, which we keep.
-          # The pkill above stops build-service writers. Additionally, GNU tar
-          # (Linux / Windows git-bash) supports --ignore-failed-read, which lets
-          # tar archive a live tree without aborting on a file that changes
-          # mid-archive. BSD tar (macOS) lacks it; there the pkill suffices.
+          # Copy the repo working tree (already built: lib/ present, node_modules
+          # populated) into the package, dropping git/CI-only dirs. We keep
+          # packages/*/src and vendor/ so the package is fixable in the field.
           TARFLAGS=""
           if tar --help 2>&1 | grep -q ignore-failed-read; then
             TARFLAGS="--ignore-failed-read"
@@ -157,33 +154,27 @@ jobs:
             --exclude='coverage' --exclude='dist-exe' --exclude='dist-python' \
             . | (cd "$PKG" && tar -xf -)
           mv node18 "$PKG/node18"
-          # The smoke test and the generated README launch ./start-dsh.sh (and
-          # ./scripts/*.mjs) from the package root, but the repo keeps the
-          # launcher in scripts/. Copy it to the root so the launch contract
-          # (and the README) hold in the shipped package.
-          cp -f scripts/start-dsh.sh "$PKG/start-dsh.sh"
-          cp -f scripts/start-dsh.ps1 "$PKG/start-dsh.ps1" 2>/dev/null || true
-          # Windows cmd.exe launchers (no PowerShell needed) — only meaningful
-          # on the Windows package, but harmless to copy everywhere.
-          cp -f scripts/start.bat "$PKG/start.bat" 2>/dev/null || true
-          cp -f scripts/install.bat "$PKG/install.bat" 2>/dev/null || true
-          # Source-mode launchers (run from packages/*/src via tsx) for in-field
-          # fixes of unknown issues without a full rebuild.
-          cp -f scripts/start-src.sh "$PKG/start-src.sh" 2>/dev/null || true
-          cp -f scripts/start-src.ps1 "$PKG/start-src.ps1" 2>/dev/null || true
-          cp -f scripts/start-src.bat "$PKG/start-src.bat" 2>/dev/null || true
+          # Launchers: copy to package root and FORCE executable bit so the
+          # launch contract holds regardless of checkout mode.
+          for f in start-dsh.sh start-dsh.ps1 start.bat install.bat \
+                   start-src.sh start-src.ps1 start-src.bat; do
+            if [ -f "scripts/$f" ]; then
+              cp -f "scripts/$f" "$PKG/$f"
+              chmod +x "$PKG/$f" 2>/dev/null || true
+            fi
+          done
           cat > "$PKG/README.md" <<'EOF'
           # dsh — Node 18 green package (${{ matrix.platform }})
 
-          Fully self-contained: includes the compiled code, the bundled Node 18
-          runtime (node18/), the full node_modules dependency tree, AND the
-          original TypeScript source (packages/*/src, vendor/, apps/*/src). No
-          Node install or network is required on the target machine.
+          Fully self-contained: includes the PRE-COMPILED dsh (packages/*/lib),
+          the bundled Node 18 runtime (node18/), the full node_modules dependency
+          tree, AND the original TypeScript source (packages/*/src, vendor/,
+          apps/*/src) for in-field fixes. No Node install or network required.
 
           ## What's inside
               node18/            bundled Node 18 runtime (node18/bin/node or node18/node.exe)
               node_modules/      all dependencies (root, hoisted by pnpm)
-              packages/*/lib     compiled JS (what runs by default)
+              packages/*/lib     compiled JS (what runs by default — pre-built)
               packages/*/src     TypeScript source (for in-field fixes)
               vendor/            vendored Cordis source
               apps/web/dist      built web UI
@@ -220,6 +211,9 @@ jobs:
           API key from the DEEPSEEK_API_KEY environment variable or a .env file:
               export DEEPSEEK_API_KEY=...    # then start
           EOF
+          # Completeness gate: never ship a hollow package.
+          test -x "$PKG/apps/cli/lib/bin.js" || { echo "::error::apps/cli/lib/bin.js missing — package is hollow"; exit 1; }
+          test -d "$PKG/node_modules/@deepseek-ai" || { echo "::error::node_modules/@deepseek-ai missing"; exit 1; }
           echo "Package tree (top):"
           ls -la "$PKG"
 
@@ -231,12 +225,12 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
         run: |
           set -uo pipefail
-          PKG="dsh-node18-${{ matrix.platform }}"
+          PKG="$PKG"
           cd "$PKG"
           if [ ! -x ./start-dsh.sh ]; then
-            echo "::warning::start-dsh.sh missing in package root — cannot run boot smoke; package still produced"
+            echo "::error::start-dsh.sh missing/non-executable in package root"
             ls -la "$PKG" || true
-            exit 0
+            exit 1
           fi
           export DSH_NODE_BIN="$PWD/node18/bin/node"
           export DSH_FOREGROUND=0
@@ -249,14 +243,14 @@ jobs:
             sleep 1
           done
           if [ "$code" != "200" ]; then
-            echo "::warning::server did not reach HTTP 200 (last=$code) — package still produced"
+            echo "::error::server did not reach HTTP 200 (last=$code)"
             tail -n 30 /tmp/dsh-3080.log || true
             ./start-dsh.sh stop || true
-          else
-            grep -qi '<html' /tmp/dsh.html || echo "::warning::index is not HTML"
-            echo "smoke OK: HTTP 200 + HTML served"
-            ./start-dsh.sh stop
+            exit 1
           fi
+          grep -qi '<html' /tmp/dsh.html || { echo "::error::index is not HTML"; exit 1; }
+          echo "smoke OK: HTTP 200 + HTML served"
+          ./start-dsh.sh stop
 
       - name: Startup test — boot + health (Windows)
         if: runner.os == 'Windows'
@@ -265,14 +259,17 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $pkg = "dsh-node18-${{ matrix.platform }}"
-          $node = "$PWD/$pkg/node18/node.exe"
+          $pkg = "$env:PKG"
+          if (-not (Test-Path "$pkg/start-dsh.sh")) {
+            Write-Error "start-dsh.sh missing in package root"; exit 1
+          }
+          $node = "$pkg/node18/node.exe"
           $log = "$env:TEMP/dsh.log"
           $err = "$env:TEMP/dsh.err"
           $env:DSH_PERMISSION_MODE = 'danger-full-access'
-          $p = Start-Process -FilePath $node -WorkingDirectory "$PWD/$pkg" -ArgumentList @(
-            '--import', "$PWD/$pkg/scripts/better-sqlite3-abi-loader.mjs",
-            '--import', "$PWD/$pkg/scripts/node18-polyfills.mjs",
+          $p = Start-Process -FilePath $node -WorkingDirectory $pkg -ArgumentList @(
+            '--import', "$pkg/scripts/better-sqlite3-abi-loader.mjs",
+            '--import', "$pkg/scripts/node18-polyfills.mjs",
             'apps/cli/lib/bin.js', '--profile', 'web',
             '--patch', 'config/deepseek-official.yml',
             '--host', '127.0.0.1', '--port', '3080'
@@ -286,13 +283,10 @@ jobs:
             Start-Sleep -Seconds 1
           }
           if (-not $ok) {
-            Write-Warning "server did not reach HTTP 200 — package still produced"; Get-Content $log -Tail 30; $p | Stop-Process -Force
-          } else {
-            Write-Host "smoke OK: HTTP 200"
-            $p | Stop-Process -Force
+            Write-Error "server did not reach HTTP 200"; Get-Content $log -Tail 30; $p | Stop-Process -Force; exit 1
           }
-          # Ensure no node process holds files before the packaging step.
-          Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force
+          Write-Host "smoke OK: HTTP 200"
+          $p | Stop-Process -Force
 
       # ---- Optional: full tool-call e2e (only when the API key secret exists) ----
       # GitHub Actions forbids `secrets` in a step `if:` expression, so we
@@ -309,12 +303,12 @@ jobs:
       - name: Package archive (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: tar -czf "dsh-node18-${{ matrix.platform }}.tar.gz" -C "dsh-node18-${{ matrix.platform }}" .
+        run: tar -czf "dsh-node18-${{ matrix.platform }}.tar.gz" -C "$PKG" .
 
       - name: Package archive (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "dsh-node18-${{ matrix.platform }}\*" -DestinationPath "dsh-node18-${{ matrix.platform }}.zip" -Force
+        run: Compress-Archive -Path "$env:PKG\*" -DestinationPath "dsh-node18-${{ matrix.platform }}.zip" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
