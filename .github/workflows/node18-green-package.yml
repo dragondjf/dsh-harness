@@ -125,19 +125,22 @@ jobs:
         run: |
           set -euo pipefail
           PKG="dsh-node18-${{ matrix.platform }}"
-          # Stop lingering build-service processes (esbuild/vite spawned by
-          # build:web) that may still be writing into node_modules, which makes
-          # tar see "file changed as we read it" and abort.
-          pkill -f esbuild || true
-          pkill -f vite || true
+          # Stop lingering build-service processes (esbuild/vite/tsdown spawned
+          # by build:web/build:lib) that may still be writing into node_modules
+          # while we archive, which makes tar see "file changed/removed".
+          pkill -9 -f esbuild || true
+          pkill -9 -f vite || true
+          pkill -9 -f tsdown || true
           rm -rf "$PKG" && mkdir -p "$PKG"
           # Runtime only needs built lib/ + dist/ + node_modules. Nested
           # workspace node_modules (vendor/*, packages/*, examples, python/*)
           # are symlink forests into the pnpm store (often root-owned,
           # unreadable by the runner) and are not needed at runtime — pnpm
           # hoists everything to the root node_modules, which we keep.
-          # --warning=no-file-changed keeps tar from aborting on a stray write.
+          # --ignore-failed-read lets tar archive a live tree without aborting
+          # on a file that changes/vanishes mid-archive.
           tar -cf - \
+            --ignore-failed-read \
             --warning=no-file-changed \
             --exclude='.git' --exclude='.github' --exclude='node18' \
             --exclude='*/src' --exclude='node_modules/.cache' \
