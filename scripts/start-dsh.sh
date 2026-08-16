@@ -99,7 +99,7 @@ pid_alive() {
 }
 
 preflight() {
-  if [[ ! -x "$ENTRY" ]]; then
+  if [[ ! -f "$ENTRY" ]]; then
     echo "✗ $ENTRY missing. Run 'pnpm install && pnpm build:lib' once," >&2
     echo "  or use source mode: pnpm dsh --profile $PROFILE" >&2
     exit 1
