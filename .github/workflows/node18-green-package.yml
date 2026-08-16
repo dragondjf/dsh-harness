@@ -110,7 +110,12 @@ jobs:
           curl -fsSL "$URL" -o node-dist."${EXT}"
           rm -rf node-runtime node18
           mkdir -p node-runtime
-          tar -xf "node-dist.${EXT}" -C node-runtime
+          if [ "$OS" = "win" ]; then
+            # Git bash's tar can't read .zip; use PowerShell's native unzip.
+            powershell -NoProfile -Command "Expand-Archive -Path node-dist.${EXT} -DestinationPath node-runtime -Force"
+          else
+            tar -xf "node-dist.${EXT}" -C node-runtime
+          fi
           mv "node-runtime/node-v${VER}-${OS}-${ARCH}" node18
           rm -rf node-runtime "node-dist.${EXT}"
           if [ "$OS" = "win" ]; then
