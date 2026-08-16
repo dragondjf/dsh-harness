@@ -1,0 +1,196 @@
+# Separate, build-free verification of the dsh Node 18 green packages.
+#
+# This does NOT rebuild anything. It downloads an ALREADY-PUBLISHED release
+# asset (default: latest `v*` release, or a tag you pass), boots the package
+# with its own bundled Node 18, and captures a screenshot of the web UI to
+# prove the UI actually renders (not just HTTP 200). The screenshot is uploaded
+# as an artifact; the job fails if the page is blank or never reaches HTTP 200.
+#
+# Trigger: manual dispatch (pick a tag). To auto-run after each release, copy
+# this file to the default branch (main) and add a `workflow_run` trigger —
+# GitHub only fires `workflow_run` listeners that live on the default branch.
+
+name: Node 18 green package — verify (screenshot)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to verify (e.g. v0.1). Empty = latest release.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read   # only needs to read the release asset
+
+concurrency:
+  group: node18-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  verify:
+    name: verify ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x64,   runner: ubuntu-latest,    ext: tar.gz }
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm, ext: tar.gz }
+          - { platform: macos-arm64, runner: macos-latest,     ext: tar.gz }
+          - { platform: windows-x64, runner: windows-latest,   ext: zip }
+
+    steps:
+      - name: Setup Node (for Playwright + helpers)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || true)
+          fi
+          if [ -z "$TAG" ]; then echo "::error::no release tag found"; exit 1; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Using tag: $TAG"
+
+      - name: Download release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/dl
+          gh release download "${{ steps.tag.outputs.tag }}" \
+            --pattern "dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" \
+            --dir /tmp/dl
+          ls -la /tmp/dl
+
+      - name: Unpack (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p pkg && tar -xzf /tmp/dl/dsh-node18-${{ matrix.platform }}.${{ matrix.ext }} -C pkg
+          echo "PKG=$PWD/pkg" >> "$GITHUB_ENV"
+
+      - name: Unpack (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path pkg | Out-Null
+          Expand-Archive -Path "/tmp/dl/dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" -DestinationPath pkg -Force
+          "PKG=$PWD/pkg" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+
+      - name: Boot package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
+        run: |
+          cd "$PKG"
+          export DSH_NODE_BIN="$PWD/node18/bin/node"
+          export DSH_FOREGROUND=0
+          export DSH_PERMISSION_MODE="danger-full-access"
+          ./start-dsh.sh start
+          code=""
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/ || true)
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          echo "HTTP after boot: $code"
+          [ "$code" = "200" ] || { echo "::error::server did not reach 200"; exit 1; }
+
+      - name: Boot package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
+        run: |
+          $pkg = "$env:PKG"
+          $node = "$pkg/node18/node.exe"
+          $env:DSH_PERMISSION_MODE = 'danger-full-access'
+          $p = Start-Process -FilePath $node -WorkingDirectory $pkg -ArgumentList @(
+            '--import', "$pkg/scripts/better-sqlite3-abi-loader.mjs",
+            '--import', "$pkg/scripts/node18-polyfills.mjs",
+            'apps/cli/lib/bin.js', '--profile', 'web',
+            '--patch', 'config/deepseek-official.yml',
+            '--host', '127.0.0.1', '--port', '3080'
+          ) -RedirectStandardOutput "$env:TEMP/dsh.log" -RedirectStandardError "$env:TEMP/dsh.err" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try { $r = Invoke-WebRequest -Uri http://127.0.0.1:3080/ -UseBasicParsing -TimeoutSec 2
+                  if ($r.StatusCode -eq 200) { $ok = $true; break } } catch {}
+            Start-Sleep -Seconds 1
+          }
+          if (-not $ok) { Write-Error "server did not reach 200"; Get-Content "$env:TEMP/dsh.log" -Tail 30; exit 1 }
+          Write-Host "HTTP after boot: 200"
+
+      - name: Install Playwright + Chromium (Linux, with deps)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm i playwright@1.48.0 >/dev/null 2>&1
+          npx playwright install --with-deps chromium
+
+      - name: Install Playwright + Chromium (macOS / Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm i playwright@1.48.0 >/dev/null 2>&1
+          npx playwright install chromium
+
+      - name: Screenshot + assert UI rendered
+        shell: bash
+        env:
+          URL: http://127.0.0.1:3080/
+          OUT: screenshot-${{ matrix.platform }}.png
+        run: |
+          cat > verify.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          const url = process.env.URL;
+          const out = process.env.OUT;
+          const browser = await chromium.launch();
+          const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+          const resp = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          if (!resp || resp.status() !== 200) { console.error('HTTP', resp && resp.status()); process.exit(2); }
+          await page.waitForSelector('body *', { timeout: 15000 });
+          await page.waitForTimeout(3000);  // let the SPA mount + render
+          const title = await page.title();
+          const text = (await page.textContent('body')) || '';
+          if (text.trim().length < 20) { console.error('page looks blank (len=' + text.trim().length + ')'); process.exit(3); }
+          await page.screenshot({ path: out, fullPage: false });
+          console.log('OK title=', JSON.stringify(title), 'textLen=', text.trim().length);
+          await browser.close();
+          EOF
+          node verify.mjs
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-${{ matrix.platform }}
+          path: screenshot-${{ matrix.platform }}.png
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop server (Unix)
+        if: always() && runner.os != 'Windows'
+        shell: bash
+        run: cd "$PKG" && ./start-dsh.sh stop || true
+
+      - name: Stop server (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force
