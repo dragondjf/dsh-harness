@@ -31,9 +31,10 @@ import { spawn } from 'node:child_process'
 import { existsSync, statSync, readFileSync } from 'node:fs'
 import { chmod, copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
-const root = resolve(import.meta.dirname, '..')
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** The closure root whose dependencies define the package. */
 const DEPLOY_ROOT_PACKAGE = '@deepseek-ai/dsh'
