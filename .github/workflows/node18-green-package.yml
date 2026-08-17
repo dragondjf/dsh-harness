@@ -141,8 +141,13 @@ jobs:
           pkill -9 -f vite || true
           pkill -9 -f tsdown || true
           # Copy the repo working tree (already built: lib/ present, node_modules
-          # populated) into the package, dropping git/CI-only dirs. We keep
-          # packages/*/src and vendor/ so the package is fixable in the field.
+          # populated) into the package, dropping git/CI-only dirs. We keep the
+          # FULL node_modules tree — pnpm links workspace packages
+          # (@deepseek-ai/dsh-*) into NESTED node_modules (e.g.
+          # apps/cli/node_modules/@deepseek-ai/dsh-app-boot -> ../../packages/boot/app-boot),
+          # NOT hoisted to the root. Stripping */*/node_modules breaks runtime
+          # resolution (ERR_MODULE_NOT_FOUND). packages/*/src and vendor/ are
+          # kept so the package is fixable in the field.
           TARFLAGS=""
           if tar --help 2>&1 | grep -q ignore-failed-read; then
             TARFLAGS="--ignore-failed-read"
@@ -150,7 +155,6 @@ jobs:
           tar -cf - $TARFLAGS \
             --exclude='.git' --exclude='.github' --exclude='node18' \
             --exclude='node_modules/.cache' \
-            --exclude='*/*/node_modules' \
             --exclude='coverage' --exclude='dist-exe' --exclude='dist-python' \
             . | (cd "$PKG" && tar -xf -)
           mv node18 "$PKG/node18"
