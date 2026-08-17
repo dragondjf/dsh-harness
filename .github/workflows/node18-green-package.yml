@@ -166,6 +166,23 @@ jobs:
           # Scanning every packages/*/* and vendor/* workspace manifest and
           # creating node_modules/<name> -> source dir fixes all of them.
           python3 scripts/link-workspace-packages.py "$PKG"
+          # Rebuild better-sqlite3's native binary against the BUNDLED Node 18
+          # (ABI 108) so the shipped package loads it directly on any target
+          # machine without a compiler. pnpm may have installed a binary built
+          # under a different Node on the build host; the abi-loader would then
+          # fall back to a source recompile (which needs a toolchain the target
+          # lacks). Rebuilding here with node18 and stamping a prebuilt for ABI
+          # 108 lets the abi-loader fast-path (copy, no compile).
+          NODE18="$PKG/node18/bin/node"
+          for bs in "$PKG/node_modules/.pnpm"/better-sqlite3@*/node_modules/better-sqlite3; do
+            [ -d "$bs" ] || continue
+            echo "rebuilding better-sqlite3 in $bs"
+            ( cd "$bs" && "$NODE18" node_modules/.bin/node-gyp rebuild --release ) || true
+            ABI=$("$NODE18" -p 'process.versions.modules')
+            mkdir -p "$bs/prebuilt"
+            cp -f "$bs/build/Release/better_sqlite3.node" "$bs/prebuilt/better_sqlite3.abi${ABI}.node"
+            echo "stamped prebuilt abi$A ABI"
+          done
           # Launchers: copy to package root and FORCE executable bit so the
           # launch contract holds regardless of checkout mode.
           for f in start-dsh.sh start-dsh.ps1 start.bat install.bat \
