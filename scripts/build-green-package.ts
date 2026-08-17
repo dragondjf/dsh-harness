@@ -220,11 +220,6 @@ class GreenPackageBuild {
       console.log('build-green-package: [dry-run] restore workspace peer hoists')
       return
     }
-    const sourceNodeModules = resolve(root, WORKSPACE_NODE_MODULES)
-    if (!existsSync(sourceNodeModules)) {
-      console.log('build-green-package: root node_modules absent; skipping peer hoist restore')
-      return
-    }
     const closureNM = join(this.appDir, 'node_modules')
     const restored: string[] = []
     // One pass resolves the immediate peer gaps; a second pass covers peers of
@@ -241,8 +236,14 @@ class GreenPackageBuild {
       for (const dep of [...declared].sort()) {
         const destination = join(closureNM, dep)
         if (existsSync(destination)) continue
-        const source = join(sourceNodeModules, dep)
-        if (!existsSync(source)) continue
+        // Workspace packages that are only reachable through a peer/dev dep may
+        // be absent from the root node_modules hoist (pnpm does not link them).
+        // Fall back to the workspace source tree, matched by package name.
+        const source = await this.findWorkspaceSource(dep)
+        if (source === undefined) {
+          console.log(`build-green-package: peer hoist ${dep} not found in root node_modules or workspace source; skipping`)
+          continue
+        }
         await mkdir(dirname(destination), { recursive: true })
         const nestedNodeModules = join(source, 'node_modules')
         await cp(source, destination, {
@@ -254,6 +255,42 @@ class GreenPackageBuild {
       }
     }
     if (restored.length > 0) console.log(`build-green-package: restored workspace peer hoists: ${restored.join(', ')}`)
+  }
+
+  /** Locate a workspace package's source dir by its package name (vendored + packages + apps). */
+  private async findWorkspaceSource(name: string): Promise<string | undefined> {
+    const candidates = [
+      join(root, 'node_modules', name),
+      join(root, 'vendor', name.replace('@deepseek-ai/', '')),
+    ]
+    for (const c of candidates) if (existsSync(c)) return c
+    const globs = ['vendor', 'packages', 'apps', 'native', 'examples', 'python']
+    for (const g of globs) {
+      const base = join(root, g)
+      if (!existsSync(base)) continue
+      const found = await this.findNamedPackage(base, name)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+
+  private async findNamedPackage(dir: string, name: string): Promise<string | undefined> {
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return undefined
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'lib') continue
+      const child = join(dir, entry.name)
+      const manifest = await this.readManifest(child)
+      if (manifest && (manifest as { name?: string }).name === name) return child
+      const nested = await this.findNamedPackage(child, name)
+      if (nested !== undefined) return nested
+    }
+    return undefined
   }
 
   /** Enumerate every package directory directly under a node_modules tree (top + scoped). */
