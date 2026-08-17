@@ -128,13 +128,18 @@ jobs:
           echo "ARTIFACT=$(ls dist-green/dsh-web-*.tar.gz | head -1)" >> "$GITHUB_ENV"
 
       # ---- Startup test: boot with the BUNDLED Node 18 and health-check ----
+      # Extract from the freshly-built archive (proven to contain a real node/node),
+      # rather than relying on the in-place dist-green dir, to avoid step-state drift.
       - name: Startup test — boot + health
         shell: bash
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
         run: |
           set -euo pipefail
-          PKG=$(ls -d dist-green/dsh-web-* | head -1)
+          ARCHIVE=$(ls dist-green/dsh-web-*.tar.gz | head -1)
+          rm -rf pkg && mkdir -p pkg
+          tar -xzf "$ARCHIVE" -C pkg
+          PKG=$(ls -d pkg/dsh-web-* | head -1)
           echo "PKG=$PKG"
           NODE_BIN="$PKG/node/node"
           if [ ! -x "$NODE_BIN" ]; then NODE_BIN="$PKG/node/node.exe"; fi
