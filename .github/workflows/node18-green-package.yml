@@ -142,7 +142,7 @@ jobs:
           echo "ARCHIVE=$ARCHIVE"
           rm -rf pkg && mkdir -p pkg
           tar -xzf "$ARCHIVE" -C pkg; echo "tar exit=$?"
-          PKG=$(ls -d pkg/dsh-web-* 2>/dev/null | head -1)
+          PKG=$(realpath "$(ls -d pkg/dsh-web-* 2>/dev/null | head -1)")
           echo "PKG=$PKG"
           if [ -z "$PKG" ]; then echo "::error::pkg dir missing after extract"; ls -la pkg; exit 1; fi
           # Guarantee a top-level node/node (fallback to bin/node if extraction oddity).
