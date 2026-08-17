@@ -48,10 +48,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { platform: linux-x64,   runner: ubuntu-latest,    ext: tar.gz }
-          - { platform: linux-arm64, runner: ubuntu-24.04-arm, ext: tar.gz }
-          - { platform: macos-arm64, runner: macos-latest,     ext: tar.gz }
-          - { platform: windows-x64, runner: windows-latest,   ext: tar.gz }
+          - { platform: linux-x64,   runner: ubuntu-latest,    ext: tar.gz, target: linux-x64 }
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm, ext: tar.gz, target: linux-arm64 }
+          - { platform: macos-arm64, runner: macos-latest,     ext: tar.gz, target: darwin-arm64 }
+          - { platform: windows-x64, runner: windows-latest,   ext: tar.gz, target: win32-x64 }
 
     steps:
       - name: Setup Node (for Playwright + helpers)
@@ -86,7 +86,7 @@ jobs:
           DL="$RUNNER_TEMP/dl"
           mkdir -p "$DL"
           gh release download "${{ steps.tag.outputs.tag }}" \
-            --pattern "dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" \
+            --pattern "dsh-web-*-${{ matrix.target }}.tar.gz" \
             --dir "$DL"
           echo "DL=$DL" >> "$GITHUB_ENV"
           ls -la "$DL"
@@ -116,15 +116,16 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          mkdir -p pkg && tar -xzf "$DL/dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" -C pkg
-          echo "PKG=$PWD/pkg" >> "$GITHUB_ENV"
+          mkdir -p pkg && tar -xzf "$DL"/dsh-web-*.tar.gz -C pkg
+          echo "PKG=$PWD/$(ls -d pkg/dsh-web-* | head -1 | xargs basename)" >> "$GITHUB_ENV"
+          echo "PKG=$PWD/pkg/$(ls -d pkg/dsh-web-* | head -1 | xargs basename)"
 
       - name: Unpack (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          mkdir -p pkg && tar -xzf "$DL/dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" -C pkg
-          echo "PKG=$PWD/pkg" >> "$GITHUB_ENV"
+          mkdir -p pkg && tar -xzf "$DL"/dsh-web-*.tar.gz -C pkg
+          echo "PKG=$PWD/pkg/$(ls -d pkg/dsh-web-* | head -1 | xargs basename)" >> "$GITHUB_ENV"
 
       - name: Boot package (Unix)
         if: runner.os != 'Windows'
@@ -134,10 +135,11 @@ jobs:
         run: |
           cd "$PKG"
           export DSH_PERMISSION_MODE="danger-full-access"
-          "$PKG/node18/bin/node" \
+          "$PKG/node/node" \
             --import "$PKG/scripts/better-sqlite3-abi-loader.mjs" \
             --import "$PKG/scripts/node18-polyfills.mjs" \
-            apps/cli/lib/bin.js --profile web \
+            "$PKG/app/lib/bin.js" web \
+            --profile web \
             --patch config/deepseek-official.yml \
             --host 127.0.0.1 --port 3080 > /tmp/dsh.log 2>&1 &
           code=""
@@ -156,12 +158,12 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
         run: |
           $pkg = "$env:PKG"
-          $node = "$pkg/node18/node.exe"
+          $node = "$pkg/node/node.exe"
           $env:DSH_PERMISSION_MODE = 'danger-full-access'
           $p = Start-Process -FilePath $node -WorkingDirectory $pkg -ArgumentList @(
             '--import', "$pkg/scripts/better-sqlite3-abi-loader.mjs",
             '--import', "$pkg/scripts/node18-polyfills.mjs",
-            'apps/cli/lib/bin.js', '--profile', 'web',
+            "$pkg/app/lib/bin.js", 'web', '--profile', 'web',
             '--patch', 'config/deepseek-official.yml',
             '--host', '127.0.0.1', '--port', '3080'
           ) -RedirectStandardOutput "$env:TEMP/dsh.log" -RedirectStandardError "$env:TEMP/dsh.err" -PassThru
@@ -175,7 +177,7 @@ jobs:
           if (-not $ok) {
             Write-Error "server did not reach 200"
             Write-Output "node exists: $(Test-Path $node)"
-            Write-Output "bin.js exists: $(Test-Path $pkg/apps/cli/lib/bin.js)"
+            Write-Output "bin.js exists: $(Test-Path $pkg/app/lib/bin.js)"
             Write-Output "config exists: $(Test-Path $pkg/config/deepseek-official.yml)"
             Write-Output "=== dsh.log (stdout) ==="; Get-Content "$env:TEMP/dsh.log" -Tail 60 -ErrorAction SilentlyContinue
             Write-Output "=== dsh.err (stderr) ==="; Get-Content "$env:TEMP/dsh.err" -Tail 60 -ErrorAction SilentlyContinue
@@ -264,7 +266,7 @@ jobs:
           if [ -n "$PKG" ] && [ -x "$PKG/start-dsh.sh" ]; then
             cd "$PKG" && ./start-dsh.sh stop || true
           fi
-          pkill -f "apps/cli/lib/bin.js" 2>/dev/null || true
+          pkill -f "app/lib/bin.js" 2>/dev/null || true
 
       - name: Stop server (Windows)
         if: always() && runner.os == 'Windows'

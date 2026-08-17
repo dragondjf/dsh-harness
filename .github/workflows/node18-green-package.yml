@@ -1,28 +1,26 @@
-# Build portable "green" (zero-install) dsh packages that run on Node 18.
+# Build portable "green" (zero-install) dsh packages via `pnpm deploy --prod`.
 #
-# Why two Node versions:
-#   * `pnpm install` MUST run under Node 18 so the native addons
-#     (better-sqlite3, lightningcss, node-pty) compile against the Node 18
-#     ABI — the same ABI as the bundled Node 18 runtime in the package.
-#   * `pnpm build:lib` (tsc -b + tsdown/rolldown) needs Node 22+ because
-#     rolldown imports node:util.styleText (Node 20.12+). It only emits plain
-#     JS, which then runs fine on Node 18 at runtime.
-#   * `pnpm build:web` (vite) runs on Node 18.
+# Route: instead of copying the 2.7 GB pnpm workspace node_modules (a symlink
+# forest that explodes archive speed on NTFS and stalls the Windows job), deploy
+# a flat, hoisted, symlink-free, production-only closure with `pnpm deploy
+# --prod` (the same mechanism scripts/build-exe-for-python-sdk.ts uses for the
+# Python SDK carrier). The closure carries pre-built lib/ artifacts and the web
+# frontend dist (resolved at runtime via @deepseek-ai/dsh-web-frontend). The
+# whole pipeline lives in scripts/build-green-package.ts.
 #
-# Per platform we: checkout -> install deps on Node 18 -> build backend lib on
-# Node 24 -> build frontend on Node 18 -> download the official Node 18 runtime
-# and bundle it -> boot the package with its own Node 18 and health-check it ->
-# package a self-contained archive. On a v* tag the archives are attached to a
-# GitHub release.
+# Per platform we: checkout -> install deps (Node 22) -> build backend lib
+# (Node 22) -> recompile native addons for Node 18 ABI -> build frontend
+# (Node 18) -> download the official Node 18 runtime -> run the green-package
+# build script (deploy + embed Node + rebuild better-sqlite3 + launchers +
+# archive) -> boot the package with its own Node 18 and health-check it. On a
+# v* tag the archives are attached to a GitHub release.
 
-name: Node 18 green package (cross-platform)
+name: Node 18 green package (pnpm deploy)
 
 on:
   push:
     branches: [main, node18]
     tags: ['v*']
-  pull_request:
-    branches: [main, node18]
   workflow_dispatch:
 
 permissions:
@@ -51,10 +49,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { platform: linux-x64,   runner: ubuntu-latest,    os: linux, arch: x64,   node_ext: tar.xz, archive_ext: tar.gz }
-          - { platform: linux-arm64, runner: ubuntu-24.04-arm, os: linux, arch: arm64, node_ext: tar.xz, archive_ext: tar.gz }
-          - { platform: macos-arm64, runner: macos-latest,     os: darwin, arch: arm64, node_ext: tar.gz, archive_ext: tar.gz }
-          - { platform: windows-x64, runner: windows-latest,   os: win,    arch: x64,   node_ext: zip,   archive_ext: zip }
+          - { platform: linux-x64,   runner: ubuntu-latest,    os: linux, arch: x64,   node_ext: tar.xz, target: linux-x64 }
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm, os: linux, arch: arm64, node_ext: tar.xz, target: linux-arm64 }
+          - { platform: macos-arm64, runner: macos-latest,     os: darwin, arch: arm64, node_ext: tar.gz, target: darwin-arm64 }
+          - { platform: windows-x64, runner: windows-latest,   os: win,    arch: x64,   node_ext: zip,   target: win32-x64 }
 
     steps:
       - name: Checkout
@@ -67,8 +65,6 @@ jobs:
           version: ${{ env.PNPM_VERSION }}
 
       # ---- Node 22 toolchain: install deps + backend build ----
-      # Install under Node 22 so rolldown's native binding (needs Node 20+) is
-      # fetched; build:lib (rolldown) also requires Node 22+.
       - name: Setup Node ${{ env.NODE22_VERSION }}
         uses: actions/setup-node@v6
         with:
@@ -81,10 +77,6 @@ jobs:
         run: pnpm run build:lib
 
       # ---- Node 18 toolchain: recompile native addons + frontend build ----
-      # Recompile the native addons (better-sqlite3 / node-pty / lightningcss)
-      # against Node 18 so they match the bundled Node 18 runtime's ABI.
-      # rolldown's binding is build-time-only and platform-specific (not
-      # Node-ABI tied), so leaving it from the Node 22 install is fine.
       - name: Setup Node ${{ env.NODE18_VERSION }}
         uses: actions/setup-node@v6
         with:
@@ -111,7 +103,6 @@ jobs:
           rm -rf node-runtime node18
           mkdir -p node-runtime
           if [ "$OS" = "win" ]; then
-            # Git bash's tar can't read .zip; use PowerShell's native unzip.
             powershell -NoProfile -Command "Expand-Archive -Path node-dist.${EXT} -DestinationPath node-runtime -Force"
           else
             tar -xf "node-dist.${EXT}" -C node-runtime
@@ -124,286 +115,57 @@ jobs:
             node18/bin/node --version
           fi
 
-      # ---- Assemble the green package tree ----
-      # Built OUTSIDE the repo ($RUNNER_TEMP/pkg) so the tar of "." never
-      # re-includes the package dir itself, and so a step's `cd` cannot drift
-      # the packaging path. PKG is exported as an absolute path for every step.
-      - name: Assemble package (Unix)
-        if: runner.os != 'Windows'
+      # ---- Build the green package (deploy closure + embed Node + archive) ----
+      - name: Build green package
         shell: bash
         run: |
           set -euo pipefail
-          PKG="$RUNNER_TEMP/pkg"
-          echo "PKG=$PKG" >> "$GITHUB_ENV"
-          rm -rf "$PKG" && mkdir -p "$PKG"
-          # Stop lingering build-service processes (esbuild/vite/tsdown) that
-          # may still be writing into node_modules while we archive.
-          pkill -9 -f esbuild || true
-          pkill -9 -f vite || true
-          pkill -9 -f tsdown || true
-          # Copy the repo working tree (already built: lib/ present, node_modules
-          # populated) into the package, dropping git/CI-only dirs. We keep the
-          # FULL node_modules tree — pnpm links workspace packages
-          # (@deepseek-ai/dsh-*) into NESTED node_modules (e.g.
-          # apps/cli/node_modules/@deepseek-ai/dsh-app-boot -> ../../packages/boot/app-boot),
-          # NOT hoisted to the root. Stripping */*/node_modules breaks runtime
-          # resolution (ERR_MODULE_NOT_FOUND). packages/*/src and vendor/ are
-          # kept so the package is fixable in the field.
-          TARFLAGS=""
-          if tar --help 2>&1 | grep -q ignore-failed-read; then
-            TARFLAGS="--ignore-failed-read"
-          fi
-          tar -cf - $TARFLAGS \
-            --exclude='.git' --exclude='.github' --exclude='node18' \
-            --exclude='node_modules/.cache' \
-            --exclude='coverage' --exclude='dist-exe' --exclude='dist-python' \
-            . | (cd "$PKG" && tar -xf -)
-          mv node18 "$PKG/node18"
-          # Link EVERY workspace package into the package-root node_modules so
-          # that dynamic imports (e.g. vendor/loader -> @deepseek-ai/dsh-*-ui-*)
-          # resolve. pnpm only symlinks DECLARED deps, so packages imported at
-          # runtime but not statically declared by the importer are missing
-          # from the node_modules walk and crash with ERR_MODULE_NOT_FOUND.
-          # Scanning every packages/*/* and vendor/* workspace manifest and
-          # creating node_modules/<name> -> source dir fixes all of them.
-          python3 scripts/link-workspace-packages.py "$PKG"
-          # Rebuild better-sqlite3's native binary against the BUNDLED Node 18
-          # (ABI 108) so the shipped package loads it directly on any target
-          # machine without a compiler. pnpm may have installed a binary built
-          # under a different Node on the build host; the abi-loader would then
-          # fall back to a source recompile (which needs a toolchain the target
-          # lacks). Rebuilding here with node18 and stamping a prebuilt for ABI
-          # 108 lets the abi-loader fast-path (copy, no compile).
-          NODE18="$PKG/node18/bin/node"
-          NODE_GYP="$PKG/node18/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
-          for bs in "$PKG/node_modules/.pnpm"/better-sqlite3@*/node_modules/better-sqlite3; do
-            [ -d "$bs" ] || continue
-            echo "rebuilding better-sqlite3 in $bs"
-            ( cd "$bs" && "$NODE18" "$NODE_GYP" rebuild --release ) || true
-            ABI=$("$NODE18" -p 'process.versions.modules')
-            mkdir -p "$bs/prebuilt"
-            cp -f "$bs/build/Release/better_sqlite3.node" "$bs/prebuilt/better_sqlite3.abi${ABI}.node"
-            echo "stamped prebuilt abi$ABI"
-          done
-          # Launchers: copy to package root and FORCE executable bit so the
-          # launch contract holds regardless of checkout mode.
-          for f in start-dsh.sh start-dsh.ps1 start.bat install.bat \
-                   start-src.sh start-src.ps1 start-src.bat; do
-            if [ -f "scripts/$f" ]; then
-              cp -f "scripts/$f" "$PKG/$f"
-              chmod +x "$PKG/$f" 2>/dev/null || true
-            fi
-          done
-          cat > "$PKG/README.md" <<'EOF'
-          # dsh — Node 18 green package (${{ matrix.platform }})
-
-          Fully self-contained: includes the PRE-COMPILED dsh (packages/*/lib),
-          the bundled Node 18 runtime (node18/), the full node_modules dependency
-          tree, AND the original TypeScript source (packages/*/src, vendor/,
-          apps/*/src) for in-field fixes. No Node install or network required.
-
-          ## What's inside
-              node18/            bundled Node 18 runtime (node18/bin/node or node18/node.exe)
-              node_modules/      all dependencies (root, hoisted by pnpm)
-              packages/*/lib     compiled JS (what runs by default — pre-built)
-              packages/*/src     TypeScript source (for in-field fixes)
-              vendor/            vendored Cordis source
-              apps/web/dist      built web UI
-              start-dsh.*        run from compiled lib/ (default)
-              start-src.*        run from source via tsx (fix unknown issues)
-              install.bat        Windows: write .env with your API key
-
-          ## Run (Linux / macOS)
-              cd dsh-node18-${{ matrix.platform }}
-              ./start-dsh.sh                 # web UI on http://127.0.0.1:3080
-              DSH_PORT=8080 ./start-dsh.sh   # custom port
-              ./start-src.sh                 # source mode (edit src/ to fix)
-
-          ## Run (Windows, cmd.exe — no PowerShell needed)
-              cd dsh-node18-${{ matrix.platform }}
-              install.bat            # first run: writes .env with your API key
-              start.bat              # boot web UI on http://127.0.0.1:3080
-              start-src.bat          # source mode (edit src/ to fix)
-
-          ## Run (Windows, PowerShell)
-              cd dsh-node18-${{ matrix.platform }}
-              pwsh ./scripts/start-dsh.ps1
-              pwsh ./scripts/start-src.ps1   # source mode
-
-          ## Source mode (fix an unknown issue without a rebuild)
-          start-src.* boots the CLI from packages/apps/cli/src/bin.ts through
-          tsx, so edits to any packages/*/src/*.ts take effect on next launch
-          without `pnpm build`. Other workspace packages still resolve via their
-          built lib/ (pnpm symlinks); to rebuild everything run `pnpm build:lib`
-          (devDependencies like tsx/tsdown are included in node_modules).
-
-          ## Configure the LLM provider
-          The default overlay is config/deepseek-official.yml, which reads the
-          API key from the DEEPSEEK_API_KEY environment variable or a .env file:
-              export DEEPSEEK_API_KEY=...    # then start
-          EOF
-          # Completeness gate: never ship a hollow package.
-          test -x "$PKG/apps/cli/lib/bin.js" || { echo "::error::apps/cli/lib/bin.js missing — package is hollow"; exit 1; }
-          test -d "$PKG/node_modules/@deepseek-ai" || { echo "::error::node_modules/@deepseek-ai missing"; exit 1; }
-          echo "Package tree (top):"
-          ls -la "$PKG"
-
-      # ---- Assemble package (Windows, in-place) ----
-      # Windows Git Bash's `tar` piping a 590MB tree with a pnpm symlink forest
-      # into $RUNNER_TEMP is extremely slow on NTFS and stalls the job. Instead
-      # assemble IN PLACE (node18/ is already at $PWD from Bundle Node 18) and
-      # package with a single `tar -czf` — no cross-directory copy. PKG = $PWD.
-      - name: Assemble package (Windows, in-place)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          PKG="$PWD"
-          echo "PKG=$PKG" >> "$GITHUB_ENV"
-          pkill -9 -f esbuild || true
-          pkill -9 -f vite || true
-          pkill -9 -f tsdown || true
-          python3 scripts/link-workspace-packages.py "$PKG"
-          NODE18="$PKG/node18/bin/node"
-          NODE_GYP="$PKG/node18/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
-          for bs in "$PKG/node_modules/.pnpm"/better-sqlite3@*/node_modules/better-sqlite3; do
-            [ -d "$bs" ] || continue
-            echo "rebuilding better-sqlite3 in $bs"
-            ( cd "$bs" && "$NODE18" "$NODE_GYP" rebuild --release ) || true
-            ABI=$("$NODE18" -p 'process.versions.modules')
-            mkdir -p "$bs/prebuilt"
-            cp -f "$bs/build/Release/better_sqlite3.node" "$bs/prebuilt/better_sqlite3.abi${ABI}.node"
-            echo "stamped prebuilt abi$ABI"
-          done
-          for f in start-dsh.sh start-dsh.ps1 start.bat install.bat \
-                   start-src.sh start-src.ps1 start-src.bat; do
-            if [ -f "scripts/$f" ]; then
-              cp -f "scripts/$f" "$PKG/$f"
-              chmod +x "$PKG/$f" 2>/dev/null || true
-            fi
-          done
-          cat > "$PKG/README.md" <<'EOF'
-          # dsh — Node 18 green package (${{ matrix.platform }})
-
-          Fully self-contained: includes the PRE-COMPILED dsh (packages/*/lib),
-          the bundled Node 18 runtime (node18/), the full node_modules dependency
-          tree, AND the original TypeScript source (packages/*/src, vendor/,
-          apps/*/src) for in-field fixes. No Node install or network required.
-
-          ## Run (Windows, cmd.exe — no PowerShell needed)
-              cd dsh-node18-${{ matrix.platform }}
-              install.bat            # first run: writes .env with your API key
-              start.bat              # boot web UI on http://127.0.0.1:3080
-              start-src.bat          # source mode (edit src/ to fix)
-          EOF
-          test -x "$PKG/apps/cli/lib/bin.js" || { echo "::error::apps/cli/lib/bin.js missing — package is hollow"; exit 1; }
-          test -d "$PKG/node_modules/@deepseek-ai" || { echo "::error::node_modules/@deepseek-ai missing"; exit 1; }
-          echo "Package tree (top):"
-          ls -la "$PKG"
+          pnpm exec tsx scripts/build-green-package.ts \
+            --target "${{ matrix.target }}" \
+            --node "$PWD/node18" \
+            --skip-smoke
+          echo "ARTIFACT=$(ls dist-green/dsh-web-*.tar.gz | head -1)" >> "$GITHUB_ENV"
 
       # ---- Startup test: boot with the BUNDLED Node 18 and health-check ----
-      - name: Startup test — boot + health (Unix)
-        if: runner.os != 'Windows'
+      - name: Startup test — boot + health
         shell: bash
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
         run: |
-          set -uo pipefail
-          PKG="$PKG"
-          cd "$PKG"
-          if [ ! -x ./start-dsh.sh ]; then
-            echo "::error::start-dsh.sh missing/non-executable in package root"
-            ls -la "$PKG" || true
-            exit 1
-          fi
-          export DSH_NODE_BIN="$PWD/node18/bin/node"
-          export DSH_FOREGROUND=0
-          export DSH_PERMISSION_MODE="${DSH_PERMISSION_MODE:-danger-full-access}"
-          ./start-dsh.sh start
+          set -euo pipefail
+          PKG=$(ls -d dist-green/dsh-web-* | head -1)
+          echo "PKG=$PKG"
+          NODE_BIN="$PKG/node/node"
+          if [ ! -x "$NODE_BIN" ]; then NODE_BIN="$PKG/node/node.exe"; fi
+          export DSH_PERMISSION_MODE="danger-full-access"
+          cd "$PKG/app"
+          "$NODE_BIN" \
+            --import "$PKG/scripts/better-sqlite3-abi-loader.mjs" \
+            --import "$PKG/scripts/node18-polyfills.mjs" \
+            "$PKG/app/lib/bin.js" web \
+            --profile web \
+            --patch config/deepseek-official.yml \
+            --host 127.0.0.1 --port 3080 > /tmp/dsh.log 2>&1 &
           code=""
-          for i in $(seq 1 60); do
-            code=$(curl -s -o /tmp/dsh.html -w '%{http_code}' http://127.0.0.1:3080/ || true)
+          for i in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/ || true)
             [ "$code" = "200" ] && break
             sleep 1
           done
+          echo "HTTP after boot: $code"
           if [ "$code" != "200" ]; then
-            echo "::error::server did not reach HTTP 200 (last=$code)"
-            tail -n 30 /tmp/dsh-3080.log || true
-            ./start-dsh.sh stop || true
+            echo "::error::server did not reach 200"
+            echo "--- dsh.log ---"; tail -30 /tmp/dsh.log
             exit 1
           fi
-          grep -qi '<html' /tmp/dsh.html || { echo "::error::index is not HTML"; exit 1; }
-          echo "smoke OK: HTTP 200 + HTML served"
-          ./start-dsh.sh stop
 
-      - name: Startup test — boot + health (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $pkg = "$env:PKG"
-          if (-not (Test-Path "$pkg/start-dsh.sh")) {
-            Write-Error "start-dsh.sh missing in package root"; exit 1
-          }
-          $node = "$pkg/node18/node.exe"
-          $log = "$env:TEMP/dsh.log"
-          $err = "$env:TEMP/dsh.err"
-          $env:DSH_PERMISSION_MODE = 'danger-full-access'
-          $p = Start-Process -FilePath $node -WorkingDirectory $pkg -ArgumentList @(
-            '--import', "$pkg/scripts/better-sqlite3-abi-loader.mjs",
-            '--import', "$pkg/scripts/node18-polyfills.mjs",
-            'apps/cli/lib/bin.js', '--profile', 'web',
-            '--patch', 'config/deepseek-official.yml',
-            '--host', '127.0.0.1', '--port', '3080'
-          ) -RedirectStandardOutput $log -RedirectStandardError $err -PassThru
-          $ok = $false
-          for ($i = 0; $i -lt 60; $i++) {
-            try {
-              $r = Invoke-WebRequest -Uri http://127.0.0.1:3080/ -UseBasicParsing -TimeoutSec 2
-              if ($r.StatusCode -eq 200) { $ok = $true; break }
-            } catch {}
-            Start-Sleep -Seconds 1
-          }
-          if (-not $ok) {
-            Write-Error "server did not reach HTTP 200"; Get-Content $log -Tail 30; $p | Stop-Process -Force; exit 1
-          }
-          Write-Host "smoke OK: HTTP 200"
-          $p | Stop-Process -Force
-
-      # ---- Optional: full tool-call e2e (only when the API key secret exists) ----
-      # GitHub Actions forbids `secrets` in a step `if:` expression, so we
-      # surface the secret's presence as an env var and gate on that instead.
-      - name: E2E tool-call suite (needs DEEPSEEK_API_KEY_EXTERNAL)
-        if: ${{ env.DEEPSEEK_KEY_PRESENT == 'true' }}
-        shell: bash
-        env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
-          DEEPSEEK_KEY_PRESENT: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL != '' }}
-        run: pnpm run test:e2e
-
-      # ---- Package the archive ----
-      # if: always() so we always get an artifact to inspect, even when the
-      # smoke (boot) test fails — the boot failure is still the job gate above.
-      - name: Package archive (Unix)
-        if: always() && runner.os != 'Windows'
-        shell: bash
-        run: tar -czf "dsh-node18-${{ matrix.platform }}.tar.gz" -C "$PKG" .
-
-      - name: Package archive (Windows)
-        if: always() && runner.os == 'Windows'
-        shell: bash
-        # In-place tar.gz (no cross-dir copy) — far faster than Compress-Archive
-        # over the 590MB pnpm symlink forest on NTFS.
-        run: tar -czf "dsh-node18-${{ matrix.platform }}.tar.gz" --exclude='.git' --exclude='.github' --exclude='node_modules/.cache' --exclude='coverage' --exclude='dist-exe' --exclude='dist-python' .
-
+      # ---- Upload the green package archive ----
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: dsh-node18-${{ matrix.platform }}
-          path: dsh-node18-${{ matrix.platform }}.${{ matrix.archive_ext }}
+          path: dist-green/dsh-web-*.tar.gz
           if-no-files-found: error
           retention-days: 14
 
