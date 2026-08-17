@@ -51,7 +51,7 @@ jobs:
           - { platform: linux-x64,   runner: ubuntu-latest,    ext: tar.gz }
           - { platform: linux-arm64, runner: ubuntu-24.04-arm, ext: tar.gz }
           - { platform: macos-arm64, runner: macos-latest,     ext: tar.gz }
-          - { platform: windows-x64, runner: windows-latest,   ext: zip }
+          - { platform: windows-x64, runner: windows-latest,   ext: tar.gz }
 
     steps:
       - name: Setup Node (for Playwright + helpers)
@@ -97,8 +97,14 @@ jobs:
         run: |
           DL="$RUNNER_TEMP/dl"
           mkdir -p "$DL"
-          AID=$(gh api "repos/$GH_REPO/actions/runs/${{ steps.tag.outputs.run_id }}/artifacts" \
-            --jq ".artifacts[] | select(.name==\"dsh-node18-${{ matrix.platform }}\") | .id" 2>/dev/null | head -1)
+          AID=""
+          for attempt in $(seq 1 30); do
+            AID=$(gh api "repos/$GH_REPO/actions/runs/${{ steps.tag.outputs.run_id }}/artifacts" \
+              --jq ".artifacts[] | select(.name==\"dsh-node18-${{ matrix.platform }}\") | .id" 2>/dev/null | head -1)
+            if [ -n "$AID" ]; then break; fi
+            echo "artifact not ready yet (attempt $attempt); waiting for build to finish..."
+            sleep 20
+          done
           if [ -z "$AID" ]; then echo "::error::artifact dsh-node18-${{ matrix.platform }} not found for run ${{ steps.tag.outputs.run_id }}"; exit 1; fi
           echo "artifact id=$AID"
           gh api "repos/$GH_REPO/actions/artifacts/$AID/zip" > "$DL/artifact.zip"
@@ -115,11 +121,10 @@ jobs:
 
       - name: Unpack (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: bash
         run: |
-          New-Item -ItemType Directory -Force -Path pkg | Out-Null
-          Expand-Archive -Path "$env:DL/dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" -DestinationPath pkg -Force
-          "PKG=$PWD/pkg" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          mkdir -p pkg && tar -xzf "$DL/dsh-node18-${{ matrix.platform }}.${{ matrix.ext }}" -C pkg
+          echo "PKG=$PWD/pkg" >> "$GITHUB_ENV"
 
       - name: Boot package (Unix)
         if: runner.os != 'Windows'

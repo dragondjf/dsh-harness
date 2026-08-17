@@ -128,7 +128,8 @@ jobs:
       # Built OUTSIDE the repo ($RUNNER_TEMP/pkg) so the tar of "." never
       # re-includes the package dir itself, and so a step's `cd` cannot drift
       # the packaging path. PKG is exported as an absolute path for every step.
-      - name: Assemble package
+      - name: Assemble package (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
@@ -247,6 +248,59 @@ jobs:
           echo "Package tree (top):"
           ls -la "$PKG"
 
+      # ---- Assemble package (Windows, in-place) ----
+      # Windows Git Bash's `tar` piping a 590MB tree with a pnpm symlink forest
+      # into $RUNNER_TEMP is extremely slow on NTFS and stalls the job. Instead
+      # assemble IN PLACE (node18/ is already at $PWD from Bundle Node 18) and
+      # package with a single `tar -czf` — no cross-directory copy. PKG = $PWD.
+      - name: Assemble package (Windows, in-place)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG="$PWD"
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+          pkill -9 -f esbuild || true
+          pkill -9 -f vite || true
+          pkill -9 -f tsdown || true
+          python3 scripts/link-workspace-packages.py "$PKG"
+          NODE18="$PKG/node18/bin/node"
+          NODE_GYP="$PKG/node18/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
+          for bs in "$PKG/node_modules/.pnpm"/better-sqlite3@*/node_modules/better-sqlite3; do
+            [ -d "$bs" ] || continue
+            echo "rebuilding better-sqlite3 in $bs"
+            ( cd "$bs" && "$NODE18" "$NODE_GYP" rebuild --release ) || true
+            ABI=$("$NODE18" -p 'process.versions.modules')
+            mkdir -p "$bs/prebuilt"
+            cp -f "$bs/build/Release/better_sqlite3.node" "$bs/prebuilt/better_sqlite3.abi${ABI}.node"
+            echo "stamped prebuilt abi$ABI"
+          done
+          for f in start-dsh.sh start-dsh.ps1 start.bat install.bat \
+                   start-src.sh start-src.ps1 start-src.bat; do
+            if [ -f "scripts/$f" ]; then
+              cp -f "scripts/$f" "$PKG/$f"
+              chmod +x "$PKG/$f" 2>/dev/null || true
+            fi
+          done
+          cat > "$PKG/README.md" <<'EOF'
+          # dsh — Node 18 green package (${{ matrix.platform }})
+
+          Fully self-contained: includes the PRE-COMPILED dsh (packages/*/lib),
+          the bundled Node 18 runtime (node18/), the full node_modules dependency
+          tree, AND the original TypeScript source (packages/*/src, vendor/,
+          apps/*/src) for in-field fixes. No Node install or network required.
+
+          ## Run (Windows, cmd.exe — no PowerShell needed)
+              cd dsh-node18-${{ matrix.platform }}
+              install.bat            # first run: writes .env with your API key
+              start.bat              # boot web UI on http://127.0.0.1:3080
+              start-src.bat          # source mode (edit src/ to fix)
+          EOF
+          test -x "$PKG/apps/cli/lib/bin.js" || { echo "::error::apps/cli/lib/bin.js missing — package is hollow"; exit 1; }
+          test -d "$PKG/node_modules/@deepseek-ai" || { echo "::error::node_modules/@deepseek-ai missing"; exit 1; }
+          echo "Package tree (top):"
+          ls -la "$PKG"
+
       # ---- Startup test: boot with the BUNDLED Node 18 and health-check ----
       - name: Startup test — boot + health (Unix)
         if: runner.os != 'Windows'
@@ -339,8 +393,10 @@ jobs:
 
       - name: Package archive (Windows)
         if: always() && runner.os == 'Windows'
-        shell: pwsh
-        run: Compress-Archive -Path "$env:PKG\*" -DestinationPath "dsh-node18-${{ matrix.platform }}.zip" -Force
+        shell: bash
+        # In-place tar.gz (no cross-dir copy) — far faster than Compress-Archive
+        # over the 590MB pnpm symlink forest on NTFS.
+        run: tar -czf "dsh-node18-${{ matrix.platform }}.tar.gz" --exclude='.git' --exclude='.github' --exclude='node_modules/.cache' --exclude='coverage' --exclude='dist-exe' --exclude='dist-python' .
 
       - name: Upload artifact
         if: always()
