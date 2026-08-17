@@ -418,10 +418,6 @@ class GreenPackageBuild {
     await mkdir(this.dataDir, { recursive: true })
     const scriptsDir = join(this.packageDir, 'scripts')
     await mkdir(scriptsDir, { recursive: true })
-    const loaderArgs = [
-      '--import', 'scripts/better-sqlite3-abi-loader.mjs',
-      '--import', 'scripts/node18-polyfills.mjs',
-    ]
     const readme = [
       `dsh web — green package (${this.cli.target.dir})`,
       '',
