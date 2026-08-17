@@ -158,6 +158,14 @@ jobs:
             --exclude='coverage' --exclude='dist-exe' --exclude='dist-python' \
             . | (cd "$PKG" && tar -xf -)
           mv node18 "$PKG/node18"
+          # Link EVERY workspace package into the package-root node_modules so
+          # that dynamic imports (e.g. vendor/loader -> @deepseek-ai/dsh-*-ui-*)
+          # resolve. pnpm only symlinks DECLARED deps, so packages imported at
+          # runtime but not statically declared by the importer are missing
+          # from the node_modules walk and crash with ERR_MODULE_NOT_FOUND.
+          # Scanning every packages/*/* and vendor/* workspace manifest and
+          # creating node_modules/<name> -> source dir fixes all of them.
+          python3 scripts/link-workspace-packages.py "$PKG"
           # Launchers: copy to package root and FORCE executable bit so the
           # launch contract holds regardless of checkout mode.
           for f in start-dsh.sh start-dsh.ps1 start.bat install.bat \
