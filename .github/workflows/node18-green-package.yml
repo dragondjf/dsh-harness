@@ -135,14 +135,23 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
         run: |
-          set -euo pipefail
-          ARCHIVE=$(ls dist-green/dsh-web-*.tar.gz | head -1)
+          set -uo pipefail
+          echo "pwd: $(pwd)"
+          echo "dist-green contents:"; ls -la dist-green/ 2>&1 || echo "NO dist-green"
+          ARCHIVE=$(ls dist-green/dsh-web-*.tar.gz 2>/dev/null | head -1)
+          echo "ARCHIVE=$ARCHIVE"
           rm -rf pkg && mkdir -p pkg
-          tar -xzf "$ARCHIVE" -C pkg
-          PKG=$(ls -d pkg/dsh-web-* | head -1)
+          tar -xzf "$ARCHIVE" -C pkg; echo "tar exit=$?"
+          PKG=$(ls -d pkg/dsh-web-* 2>/dev/null | head -1)
           echo "PKG=$PKG"
+          if [ -z "$PKG" ]; then echo "::error::pkg dir missing after extract"; ls -la pkg; exit 1; fi
+          # Guarantee a top-level node/node (fallback to bin/node if extraction oddity).
+          if [ ! -x "$PKG/node/node" ] && [ -x "$PKG/node/bin/node" ]; then
+            cp -f "$PKG/node/bin/node" "$PKG/node/node"
+          fi
+          chmod +x "$PKG/node/node" 2>/dev/null || true
           NODE_BIN="$PKG/node/node"
-          if [ ! -x "$NODE_BIN" ]; then NODE_BIN="$PKG/node/node.exe"; fi
+          echo "NODE_BIN=$NODE_BIN"; ls -la "$NODE_BIN" 2>&1
           export DSH_PERMISSION_MODE="danger-full-access"
           cd "$PKG/app"
           "$NODE_BIN" \
