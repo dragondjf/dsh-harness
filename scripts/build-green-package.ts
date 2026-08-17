@@ -202,7 +202,87 @@ class GreenPackageBuild {
       this.appDir,
     ])
     await this.restoreLegacyHoists()
+    await this.restoreWorkspacePeerHoists()
     await this.materializeStagedLinks()
+  }
+
+  /**
+   * `pnpm deploy --prod` omits workspace packages that are only reachable
+   * through a peerDependency (e.g. `@deepseek-ai/cordis-plugin-group`, imported
+   * at runtime by `@deepseek-ai/dsh-app-boot` but declared only as a peer/dev
+   * dep there). They resolve fine in the dev hoist but are absent from the flat
+   * closure, surfacing as ERR_MODULE_NOT_FOUND at boot. Walk every package
+   * already present in the closure, collect its runtime deps + peer deps, and
+   * copy any missing `@deepseek-ai/*` workspace package from the root install.
+   */
+  private async restoreWorkspacePeerHoists(): Promise<void> {
+    if (this.cli.dryRun) {
+      console.log('build-green-package: [dry-run] restore workspace peer hoists')
+      return
+    }
+    const sourceNodeModules = resolve(root, WORKSPACE_NODE_MODULES)
+    if (!existsSync(sourceNodeModules)) {
+      console.log('build-green-package: root node_modules absent; skipping peer hoist restore')
+      return
+    }
+    const closureNM = join(this.appDir, 'node_modules')
+    const restored: string[] = []
+    // One pass resolves the immediate peer gaps; a second pass covers peers of
+    // the newly added packages. Two passes are enough for this workspace depth.
+    for (let pass = 0; pass < 2; pass++) {
+      const declared = new Set<string>()
+      for (const pkgDir of await this.walkPackageDirs(closureNM)) {
+        const manifest = await this.readManifest(pkgDir)
+        if (!manifest) continue
+        for (const dep of [...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.peerDependencies ?? {})]) {
+          if (dep.startsWith('@deepseek-ai/')) declared.add(dep)
+        }
+      }
+      for (const dep of [...declared].sort()) {
+        const destination = join(closureNM, dep)
+        if (existsSync(destination)) continue
+        const source = join(sourceNodeModules, dep)
+        if (!existsSync(source)) continue
+        await mkdir(dirname(destination), { recursive: true })
+        const nestedNodeModules = join(source, 'node_modules')
+        await cp(source, destination, {
+          recursive: true,
+          dereference: true,
+          filter: path => path !== nestedNodeModules && !path.startsWith(nestedNodeModules + sep),
+        })
+        restored.push(dep)
+      }
+    }
+    if (restored.length > 0) console.log(`build-green-package: restored workspace peer hoists: ${restored.join(', ')}`)
+  }
+
+  /** Enumerate every package directory directly under a node_modules tree (top + scoped). */
+  private async walkPackageDirs(nodeModules: string): Promise<string[]> {
+    if (!existsSync(nodeModules)) return []
+    const dirs: string[] = []
+    for (const entry of await readdir(nodeModules, { withFileTypes: true })) {
+      const top = join(nodeModules, entry.name)
+      if (!entry.isDirectory()) continue
+      if (entry.name.startsWith('.')) continue
+      if (entry.name.startsWith('@')) {
+        for (const sub of await readdir(top, { withFileTypes: true })) {
+          if (sub.isDirectory()) dirs.push(join(top, sub.name))
+        }
+      } else {
+        dirs.push(top)
+      }
+    }
+    return dirs
+  }
+
+  private async readManifest(dir: string): Promise<{ dependencies?: Record<string, string>; peerDependencies?: Record<string, string> } | undefined> {
+    const path = join(dir, 'package.json')
+    if (!existsSync(path)) return undefined
+    try {
+      return JSON.parse(await readFile(path, 'utf8')) as { dependencies?: Record<string, string>; peerDependencies?: Record<string, string> }
+    } catch {
+      return undefined
+    }
   }
 
   /**
