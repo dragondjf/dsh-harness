@@ -300,17 +300,20 @@ jobs:
         run: pnpm run test:e2e
 
       # ---- Package the archive ----
+      # if: always() so we always get an artifact to inspect, even when the
+      # smoke (boot) test fails — the boot failure is still the job gate above.
       - name: Package archive (Unix)
-        if: runner.os != 'Windows'
+        if: always() && runner.os != 'Windows'
         shell: bash
         run: tar -czf "dsh-node18-${{ matrix.platform }}.tar.gz" -C "$PKG" .
 
       - name: Package archive (Windows)
-        if: runner.os == 'Windows'
+        if: always() && runner.os == 'Windows'
         shell: pwsh
         run: Compress-Archive -Path "$env:PKG\*" -DestinationPath "dsh-node18-${{ matrix.platform }}.zip" -Force
 
       - name: Upload artifact
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: dsh-node18-${{ matrix.platform }}
