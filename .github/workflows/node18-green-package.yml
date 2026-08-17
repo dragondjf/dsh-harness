@@ -123,6 +123,7 @@ jobs:
           pnpm exec tsx scripts/build-green-package.ts \
             --target "${{ matrix.target }}" \
             --node "$PWD/node18" \
+            --skip-build \
             --skip-smoke
           echo "ARTIFACT=$(ls dist-green/dsh-web-*.tar.gz | head -1)" >> "$GITHUB_ENV"
 
