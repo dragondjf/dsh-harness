@@ -174,14 +174,15 @@ jobs:
           # lacks). Rebuilding here with node18 and stamping a prebuilt for ABI
           # 108 lets the abi-loader fast-path (copy, no compile).
           NODE18="$PKG/node18/bin/node"
+          NODE_GYP="$PKG/node18/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
           for bs in "$PKG/node_modules/.pnpm"/better-sqlite3@*/node_modules/better-sqlite3; do
             [ -d "$bs" ] || continue
             echo "rebuilding better-sqlite3 in $bs"
-            ( cd "$bs" && "$NODE18" node_modules/.bin/node-gyp rebuild --release ) || true
+            ( cd "$bs" && "$NODE18" "$NODE_GYP" rebuild --release ) || true
             ABI=$("$NODE18" -p 'process.versions.modules')
             mkdir -p "$bs/prebuilt"
             cp -f "$bs/build/Release/better_sqlite3.node" "$bs/prebuilt/better_sqlite3.abi${ABI}.node"
-            echo "stamped prebuilt abi$A ABI"
+            echo "stamped prebuilt abi$ABI"
           done
           # Launchers: copy to package root and FORCE executable bit so the
           # launch contract holds regardless of checkout mode.
