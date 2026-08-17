@@ -195,7 +195,7 @@ class GreenPackageBuild {
     else await rm(this.appDir, { recursive: true, force: true })
     await this.run('deploy', pnpmBin(), [
       '--filter', DEPLOY_ROOT_PACKAGE,
-      'deploy', '--legacy', '--prod',
+      'deploy', '--prod',
       '--config.node-linker=hoisted',
       '--config.auto-install-peers=false',
       '--config.link-workspace-packages=true',
