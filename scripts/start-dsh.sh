@@ -42,7 +42,13 @@ set -euo pipefail
 
 # ---- resolve repo root (symlink-safe) ----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# In the repo the launcher lives in scripts/; in a shipped green package it is
+# copied to the package root. Detect which and set REPO_ROOT accordingly.
+if [[ "$(basename "$SCRIPT_DIR")" == "scripts" ]]; then
+  REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+else
+  REPO_ROOT="$SCRIPT_DIR"
+fi
 cd "$REPO_ROOT"
 
 # ---- node: prefer an explicit Node 18+ ----

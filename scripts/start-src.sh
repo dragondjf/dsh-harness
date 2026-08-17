@@ -13,7 +13,11 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ "$(basename "$SCRIPT_DIR")" == "scripts" ]]; then
+  REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+else
+  REPO_ROOT="$SCRIPT_DIR"
+fi
 cd "$REPO_ROOT"
 
 NODE_BIN="${DSH_NODE_BIN:-}"
