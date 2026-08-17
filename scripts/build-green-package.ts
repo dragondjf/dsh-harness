@@ -330,7 +330,10 @@ class GreenPackageBuild {
       return
     }
     await mkdir(this.nodeDir, { recursive: true })
-    await cp(source, this.nodeDir, { recursive: true, dereference: true })
+    // Merge the runtime's contents into nodeDir (cp into an existing dir nests as a subdir otherwise).
+    for (const entry of await readdir(source)) {
+      await cp(join(source, entry), join(this.nodeDir, entry), { recursive: true, dereference: true })
+    }
     // Launchers and rebuild expect node/node (or node/node.exe) at the top of the package node dir.
     const embeddedBin = this.findNode(this.nodeDir)
     const wanted = join(this.nodeDir, process.platform === 'win32' ? 'node.exe' : 'node')
