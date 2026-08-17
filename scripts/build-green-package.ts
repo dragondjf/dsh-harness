@@ -307,16 +307,35 @@ class GreenPackageBuild {
     console.log(`build-green-package: copied frontend dist from ${source} into closure`)
   }
 
+  /** Locate the node binary inside a runtime dir (handles `node`, `node.exe`, `bin/node` layouts). */
+  private findNode(dir: string): string | undefined {
+    const candidates = [
+      join(dir, 'node'),
+      join(dir, 'node.exe'),
+      join(dir, 'bin', 'node'),
+      join(dir, 'bin', 'node.exe'),
+    ]
+    return candidates.find(c => existsSync(c))
+  }
+
   /** Copy the bundled Node runtime into the package. */
   async embedNode(): Promise<void> {
     const source = this.cli.nodeDir!
-    if (!existsSync(join(source, process.platform === 'win32' ? 'node.exe' : 'node'))) {
+    const nodeBin = this.findNode(source)
+    if (!nodeBin) {
       throw new Error(`build-green-package: ${source} has no node binary; pass a real Node runtime dir.`)
     }
-    if (this.cli.dryRun) console.log(`build-green-package: [dry-run] cp -r ${source} ${this.nodeDir}`)
-    else {
-      await mkdir(this.nodeDir, { recursive: true })
-      await cp(source, this.nodeDir, { recursive: true, dereference: true })
+    if (this.cli.dryRun) {
+      console.log(`build-green-package: [dry-run] cp -r ${source} ${this.nodeDir}`)
+      return
+    }
+    await mkdir(this.nodeDir, { recursive: true })
+    await cp(source, this.nodeDir, { recursive: true, dereference: true })
+    // Launchers and rebuild expect node/node (or node/node.exe) at the top of the package node dir.
+    const embeddedBin = this.findNode(this.nodeDir)
+    const wanted = join(this.nodeDir, process.platform === 'win32' ? 'node.exe' : 'node')
+    if (embeddedBin && embeddedBin !== wanted) {
+      await copyFile(embeddedBin, wanted)
     }
     console.log(`build-green-package: embedded Node from ${source}`)
   }
