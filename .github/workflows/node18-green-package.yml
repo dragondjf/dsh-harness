@@ -158,7 +158,6 @@ jobs:
             --import "$PKG/scripts/better-sqlite3-abi-loader.mjs" \
             --import "$PKG/scripts/node18-polyfills.mjs" \
             "$PKG/app/lib/bin.js" web \
-            --patch config/deepseek-official.yml \
             --host 127.0.0.1 --port 3080 > /tmp/dsh.log 2>&1 &
           code=""
           for i in $(seq 1 90); do
