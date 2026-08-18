@@ -662,7 +662,7 @@ class GreenPackageBuild {
     }
     console.log(`build-green-package: ${label}: ${printable}`)
     await new Promise<void>((resolvePromise, reject) => {
-      const child = spawn(command, args, { cwd, stdio: 'inherit', env: { ...process.env, CI: 'true' } })
+      const child = spawn(command, args, { cwd, stdio: 'inherit', env: { ...process.env, CI: 'true' }, shell: process.platform === 'win32' })
       child.once('error', error => reject(new Error(`build-green-package: ${label} failed to spawn: ${error.message} (${printable})`)))
       child.once('exit', (code, signal) => {
         if (code === 0) return resolvePromise()
